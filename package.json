@@ -1,5 +1,5 @@
 {
-  "name": "ai-pdf-reader",
+  "name": "pdf-explainer",
   "version": "1.0.1",
   "description": "AI-enhanced PDF reader that explains highlighted text and saves the explanation as a real PDF annotation",
   "main": "src/main/main.js",
@@ -46,8 +46,8 @@
     "webpack-cli": "^6.0.1"
   },
   "build": {
-    "appId": "com.yourname.ai-pdf-reader",
-    "productName": "AI PDF Reader",
+    "appId": "com.yourname.pdf-explainer",
+    "productName": "PDF Explainer",
     "icon": "resources/icon",
     "files": [
       "dist/**/*",

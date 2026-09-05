@@ -1,4 +1,4 @@
-# AI PDF Reader
+# PDF Explainer
 
 An Electron desktop app for reading academic papers (PDF) with an AI assistant built in. It
 explains passages and equations in context, lets you chat about a marked-up region or about
@@ -6,7 +6,7 @@ the whole document, and saves the results as real annotations inside the PDF fil
 so the notes are still there next time you (or anyone else) open it in any PDF viewer.
 
 <p align="left">
-  <img src="ai-pdf-reader-logo.png" alt="AI PDF Reader Logo" width="200">
+  <img src="pdf-explainer-logo.png" alt="PDF Explainer Logo" width="200">
 </p>
 
 ## What it does
@@ -41,7 +41,7 @@ so the notes are still there next time you (or anyone else) open it in any PDF v
 
 ```bash
 git clone <this repository>
-cd pdf_reader
+cd pdf_explainer
 
 npm install
 npm run build   # bundles the renderer (React UI) into dist/

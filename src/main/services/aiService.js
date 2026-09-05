@@ -16,7 +16,7 @@ function updateSettings(newApiKey, newModel) {
         baseURL: aiConfig.baseURL,
         defaultHeaders: {
           'HTTP-Referer': 'https://github.com/adrirubio/ai-pdf-reader',
-          'X-Title': 'AI PDF Reader',
+          'X-Title': 'PDF Explainer',
         },
       })
     : null;

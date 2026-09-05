@@ -130,7 +130,7 @@ const LandingPage = ({ onOpenPDF }) => {
           textShadow: '0 2px 10px rgba(0, 0, 0, 0.2)',
           letterSpacing: '-0.5px',
         }}>
-          AI PDF Reader
+          PDF Explainer
         </h1>
         
         <p style={{
@@ -469,7 +469,7 @@ const LandingPage = ({ onOpenPDF }) => {
           transition: 'opacity 0.6s ease-out',
           transitionDelay: '0.6s',
         }}>
-          <p>AI PDF Reader • Powered by PDF.js and OpenRouter</p>
+          <p>PDF Explainer • Powered by PDF.js and OpenRouter</p>
         </div>
       </div>
       
