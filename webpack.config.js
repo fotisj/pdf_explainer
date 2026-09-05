@@ -4,7 +4,12 @@ const HtmlWebpackPlugin = require('html-webpack-plugin');
 module.exports = {
   mode: 'development',
   entry: './src/renderer/index.js',
-  target: 'electron-renderer',
+  // Not 'electron-renderer': this app runs with nodeIntegration:false/contextIsolation:true
+  // (all main-process access goes through the window.electron preload bridge), so there's no
+  // Node `require` at runtime. 'electron-renderer' assumes Node built-ins are available and
+  // leaves some dependencies' `require('node:...')` calls unbundled, which then throw
+  // "require is not defined" — 'web' makes webpack actually resolve/bundle them instead.
+  target: 'web',
   output: {
     filename: 'renderer.js',
     path: path.resolve(__dirname, 'dist'),

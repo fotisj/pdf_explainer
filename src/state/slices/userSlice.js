@@ -2,16 +2,15 @@ import { createSlice } from '@reduxjs/toolkit';
 
 const initialState = {
   preferences: {
-    defaultExplanationStyle: 'simple', // simple, detailed, technical
-    defaultScale: 1.5, // Default zoom level
-    fontSizePDF: 'medium', // small, medium, large
-    aiResponseStyle: 'conversational', // conversational, concise, academic
-    openaiApiKey: '', // Stored OpenAI API key
+    openrouterApiKey: '',
+    openrouterModel: '',
   },
-  settings: {
-    autoOpenAIPanel: true, // Automatically open AI panel when text is selected
-    smoothScrolling: true,
-    confirmBeforeClosing: true,
+  // What we know about the currently configured model, fetched from OpenRouter's model list.
+  modelCapabilities: {
+    checked: false,
+    found: false,
+    supportsImages: null,
+    supportsCaching: null,
   },
 };
 
@@ -19,68 +18,23 @@ export const userSlice = createSlice({
   name: 'user',
   initialState,
   reducers: {
-    setDefaultExplanationStyle: (state, action) => {
-      state.preferences.defaultExplanationStyle = action.payload;
+    setOpenrouterSettings: (state, action) => {
+      const { apiKey, model } = action.payload || {};
+      if (typeof apiKey === 'string') state.preferences.openrouterApiKey = apiKey;
+      if (typeof model === 'string') state.preferences.openrouterModel = model;
     },
-    setDefaultScale: (state, action) => {
-      state.preferences.defaultScale = action.payload;
-    },
-    setFontSizePDF: (state, action) => {
-      state.preferences.fontSizePDF = action.payload;
-    },
-    setAIResponseStyle: (state, action) => {
-      state.preferences.aiResponseStyle = action.payload;
-    },
-    setOpenaiApiKey: (state, action) => {
-      state.preferences.openaiApiKey = action.payload;
-    },
-    setAutoOpenAIPanel: (state, action) => {
-      state.settings.autoOpenAIPanel = action.payload;
-    },
-    setSmoothScrolling: (state, action) => {
-      state.settings.smoothScrolling = action.payload;
-    },
-    setConfirmBeforeClosing: (state, action) => {
-      state.settings.confirmBeforeClosing = action.payload;
-    },
-    updatePreferences: (state, action) => {
-      state.preferences = {
-        ...state.preferences,
-        ...action.payload,
+    setModelCapabilities: (state, action) => {
+      const info = action.payload;
+      state.modelCapabilities = {
+        checked: true,
+        found: !!info,
+        supportsImages: info ? info.supportsImages : null,
+        supportsCaching: info ? info.supportsCaching : null,
       };
-    },
-    updateSettings: (state, action) => {
-      state.settings = {
-        ...state.settings,
-        ...action.payload,
-      };
-    },
-    resetUserPreferences: (state) => {
-      state.preferences = initialState.preferences;
-    },
-    resetUserSettings: (state) => {
-      state.settings = initialState.settings;
-    },
-    resetUserState: (state) => {
-      return initialState;
     },
   },
 });
 
-export const {
-  setDefaultExplanationStyle,
-  setDefaultScale,
-  setFontSizePDF,
-  setAIResponseStyle,
-  setOpenaiApiKey,
-  setAutoOpenAIPanel,
-  setSmoothScrolling,
-  setConfirmBeforeClosing,
-  updatePreferences,
-  updateSettings,
-  resetUserPreferences,
-  resetUserSettings,
-  resetUserState,
-} = userSlice.actions;
+export const { setOpenrouterSettings, setModelCapabilities } = userSlice.actions;
 
-export default userSlice.reducer; 
+export default userSlice.reducer;

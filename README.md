@@ -1,138 +1,104 @@
 # AI PDF Reader
 
-An AI-enhanced PDF reader that explains highlighted text. Built with Electron and React.
+An Electron desktop app for reading academic papers (PDF) with an AI assistant built in. It
+explains passages and equations in context, lets you chat about a marked-up region or about
+the whole document, and saves the results as real annotations inside the PDF file itself —
+so the notes are still there next time you (or anyone else) open it in any PDF viewer.
 
 <p align="left">
-  <img src="ai-pdf-reader-logo.png"
-       alt="AI PDF Reader Logo"
-       width="200">
+  <img src="ai-pdf-reader-logo.png" alt="AI PDF Reader Logo" width="200">
 </p>
 
-## 🎬 Demo Preview & Full Video
+## What it does
 
-Watch a quick preview below (GIF), or click the link to see the full demo video.
+- **Read PDFs** — open a file, page through it, zoom, jump to a page, and pick up recently
+  opened documents from a list.
+- **Explain a marked passage** — select text, or drag a box over an equation, figure or table
+  ("Mark region"), and ask the AI to explain it. The AI always has the full text of the paper
+  as context, so it can explain a passage in terms of the paper's own notation and earlier
+  definitions rather than generically.
+- **Ask about the whole document** — a separate chat panel (left side of the window) that isn't
+  tied to any specific passage: ask free-form questions about the paper as a whole, with the
+  full document text sent as context every time.
+- **Save answers as real PDF annotations** — "Save as note" writes the AI's answer into the PDF
+  as a proper Highlight/Square annotation with a linked popup comment, so it shows up in the
+  Notes column while reading and persists in the file itself. A document-wide chat's note is
+  saved as a small marker near the bottom of the last page instead, since it isn't tied to a
+  highlighted passage.
+- **Abstract** — for a longer back-and-forth discussion, "Abstract" asks the AI to condense the
+  whole conversation into a short, reviewable summary you can edit before saving, instead of
+  saving the raw last reply (or the entire transcript).
+- **Rendered replies** — AI responses are rendered as formatted markdown, including LaTeX math
+  (`$...$` / `$$...$$`) typeset with KaTeX, instead of raw source text.
+- **Any OpenRouter model** — bring your own OpenRouter API key and pick any model from the live
+  catalog (with autocomplete and a "recently used" list), including a check for whether it
+  supports image input (needed for "Mark region") and prompt caching (keeps a long reading
+  session affordable, since the whole paper is resent as context on every call).
 
-### 🔹 Preview (GIF)
-![AI PDF Reader Demo - Preview](https://github.com/adrirubio/ai-pdf-reader-demo/raw/main/ai-pdf-reader-demo.gif)
+## How to use it
 
-### 🔹 Full Video
-[▶️ Click here to watch the full demo video (MP4)](https://github.com/adrirubio/ai-pdf-reader-demo/raw/main/ai-pdf-reader-demo.mp4)
+### 1. Install and run
 
----
-
-## Features
-
-- **PDF Viewing & Navigation**
-  - Open and display PDF documents
-  - Navigate between pages with intuitive controls and keyboard shortcuts
-  - Direct page navigation with input field for quick jumps
-  - Adjust zoom level for comfortable reading
-  - Track and access recently opened documents
-  - Remove documents from recent list with delete button
-
-- **AI-Powered Text Analysis**
-  - Highlight text to get instant AI explanations
-  - Custom instruction input for personalized explanations
-  - Built-in API key configuration for seamless setup
-
-- **Advanced Chat Interface**
-  - Ask follow-up questions about highlighted content
-  - Multiple chat sessions for different sections of the document
-  - Persistent chat history between application sessions
-  - Last active chat tab remembered per document
-  - Stream responses in real-time for better user experience
-
-- **Highlighting & Annotation**
-  - Create and save text highlights across the document
-  - Highlights persist between reading sessions
-  - Improved highlight removal and management
-  - Quick navigation to highlighted sections
-
-- **Cross-Platform Compatibility**
-  - Available for Windows, macOS, and Linux
-  - Consistent experience across all platforms
-
-## 📋 Installation
-
-### Windows
-
-#### Installer (Recommended)
-1. Download the installer from the [latest release](https://github.com/adrirubio/ai-pdf-reader/releases/latest)
-2. Run `AI.PDF.Reader.Setup.1.0.1.exe`
-3. Follow the installation wizard
-4. Launch the app from your Start Menu or Desktop shortcut
-
-#### Run from Source
 ```bash
-# Clone the repository
-git clone https://github.com/adrirubio/ai-pdf-reader.git
-cd ai-pdf-reader
+git clone <this repository>
+cd pdf_reader
 
-# Install dependencies
 npm install
-
-# Run the application
-npm run build
-npm start
+npm run build   # bundles the renderer (React UI) into dist/
+npm start       # launches the Electron app
 ```
 
-### Linux
+`npm run dev` runs webpack in watch mode if you're changing the renderer UI — run `npm start`
+in a separate terminal to launch the app against whatever's currently built.
 
-#### AppImage
-```bash
-# Download the AppImage
-wget https://github.com/adrirubio/ai-pdf-reader/releases/download/v1.0.1/AI.PDF.Reader-1.0.1.AppImage
+### 2. Set up your OpenRouter key
 
-# Make it executable
-chmod +x AI.PDF.Reader-1.0.1.AppImage
+Click the settings button in the header, paste an API key from
+[openrouter.ai/keys](https://openrouter.ai/keys), and pick a model (start typing to search the
+catalog, or reuse a recently-used one). Green badges show whether the selected model supports
+image input and prompt caching.
 
-# Run it
-./AI.PDF.Reader-1.0.1.AppImage --no-sandbox
-```
+### 3. Read and ask
 
-#### DEB Package
-```bash
-# Download the DEB package
-wget https://github.com/adrirubio/ai-pdf-reader/releases/download/v1.0.1/ai-pdf-reader_1.0.1_amd64.deb
+- Open a PDF from the landing screen.
+- **Select some text**, or use **"Mark region"** to drag a box over an equation/figure, then
+  click through to open the explain panel. Edit the pre-filled prompt if you like, then send it.
+- Ask follow-up questions in the same panel — the AI sees the whole conversation each time.
+- Click **"Save as note"** to write the current answer into the PDF, or **"Abstract"** to get a
+  short, editable summary of the whole discussion to save instead.
+- Click **"Ask about document"** in the header to open the whole-document chat on the left side
+  and ask questions that aren't tied to any specific passage.
+- Saved notes show up in the **Notes column** next to the page they're attached to.
 
-# Install it
-sudo dpkg -i ai-pdf-reader_1.0.1_amd64.deb
+## Building blocks
 
-# Run it (after installation, you can run it from your applications menu or command line)
-ai-pdf-reader
-```
-
-### macOS
-You can run from source:
-
-```bash
-# Clone the repository
-git clone https://github.com/adrirubio/ai-pdf-reader.git
-cd ai-pdf-reader
-
-# Install dependencies
-npm install
-
-# Run the application
-npm run build
-npm start
-```
-
-## Technologies Used
-
-- Electron - Cross-platform desktop app framework
-- React - UI library
-- Redux - State management
-- PDF.js - PDF rendering engine
-- OpenAI API - AI-powered explanations and chat
-- Webpack - Module bundler
+- **[Electron](https://www.electronjs.org/)** — the desktop shell. The main process
+  (`src/main`) owns the filesystem, reads/writes PDF annotations, and talks to OpenRouter; the
+  renderer process (`src/renderer`) is a sandboxed Chromium window with `nodeIntegration`
+  disabled, talking to the main process only through a `contextBridge` preload script
+  (`src/main/preload.js`) — never directly.
+- **[React](https://react.dev/) + [Redux Toolkit](https://redux-toolkit.js.org/)** — the
+  renderer UI and its state (recent documents, user preferences, model capabilities).
+- **[pdfjs-dist](https://mozilla.github.io/pdf.js/)** — renders PDF pages to canvas and extracts
+  the text layer (both the visible text and the full document text used as AI context).
+- **[pdf-lib](https://pdf-lib.js.org/)** — reads and writes real PDF annotation objects
+  (Highlight/Square + Popup) at a low level, so saved notes are genuine PDF annotations rather
+  than something proprietary to this app.
+- **[openai](https://www.npmjs.com/package/openai) SDK → OpenRouter** — the official OpenAI SDK
+  is used purely as an HTTP client, pointed at OpenRouter's OpenAI-compatible API, so any model
+  OpenRouter offers can be used with one client. Streaming is used for the chat panels; a
+  one-shot (non-streaming) call is used for "Abstract".
+- **[react-markdown](https://github.com/remarkjs/react-markdown) + remark-math + rehype-katex +
+  [KaTeX](https://katex.org/)** — renders the AI's markdown and LaTeX math output in the chat
+  panels.
+- **[electron-store](https://github.com/sindresorhus/electron-store)** — persists settings (API
+  key, selected model, recently-used models) and the recent-documents list locally.
+- **[Webpack](https://webpack.js.org/) + Babel** — bundles the React/JSX renderer code into the
+  single script Electron loads (`target: 'web'`, since the renderer never uses Node APIs
+  directly — everything goes through the preload bridge).
+- **[electron-builder](https://www.electron.build/)** — packages the app for Windows, macOS and
+  Linux (`npm run dist`).
 
 ## License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
-## Acknowledgments
-
-- [PDF.js](https://mozilla.github.io/pdf.js/) - Mozilla's PDF viewer
-- [Electron](https://www.electronjs.org/) - For making cross-platform desktop apps easy
-- [OpenAI](https://openai.com/) - For providing the AI capabilities
+MIT — see [LICENSE](LICENSE).

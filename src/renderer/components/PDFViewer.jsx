@@ -1,11 +1,8 @@
 import React, { useEffect, useRef, useState, useImperativeHandle, forwardRef } from 'react';
+import NotesColumn from './NotesColumn';
 
-const PDFViewer = forwardRef(({ filePath, onTextSelected, pdfContentStyle = {}, onFullTextExtracted }, ref) => {
-  // Input validation - ensure filePath is a string
+const PDFViewer = forwardRef(({ filePath, onPassageMarked, onDocumentTextExtracted, visionCapable }, ref) => {
   const validFilePath = filePath && typeof filePath === 'string' ? filePath : '';
-  if (!validFilePath && filePath) {
-    console.error('PDFViewer received invalid filePath type:', typeof filePath);
-  }
   const [pdfDocument, setPdfDocument] = useState(null);
   const [currentPage, setCurrentPage] = useState(1);
   const [initialPageLoaded, setInitialPageLoaded] = useState(false);
@@ -13,112 +10,66 @@ const PDFViewer = forwardRef(({ filePath, onTextSelected, pdfContentStyle = {}, 
   const [scale, setScale] = useState(1.5);
   const [loading, setLoading] = useState(false);
   const [loadingStatus, setLoadingStatus] = useState('');
-  const [persistentHighlights, setPersistentHighlights] = useState([]);
-  const [pageRenderKey, setPageRenderKey] = useState(0);
   const [error, setError] = useState(null);
-  const [activeHighlightId, setActiveHighlightId] = useState(null);
-  const [selectionTooltip, setSelectionTooltip] = useState({
-    visible: false,
-    text: '',
-    x: 0,
-    y: 0
-  });
+  const [pageRenderKey, setPageRenderKey] = useState(0);
   const [pageInputValue, setPageInputValue] = useState('');
   const [pageInputError, setPageInputError] = useState('');
+
+  // Annotations already saved into the PDF file (read back via pdf-lib).
+  const [savedAnnotations, setSavedAnnotations] = useState([]);
+  // The single in-progress, not-yet-saved marked passage. Cleared on discard/save/new selection.
+  const [pendingSelection, setPendingSelection] = useState(null);
+  const [activeNoteId, setActiveNoteId] = useState(null); // hovered/clicked note, highlighted in both places
+
+  const [regionMode, setRegionMode] = useState(false);
+  const [regionDrag, setRegionDrag] = useState(null); // {startX, startY, curX, curY} in canvasWrapper-local px
+
+  const [selectionTooltip, setSelectionTooltip] = useState({ visible: false, text: '', x: 0, y: 0 });
+
+  const [notesColumnWidth, setNotesColumnWidth] = useState(() => {
+    const stored = parseInt(window.localStorage?.getItem('pdfReaderNotesColumnWidth'), 10);
+    return Number.isFinite(stored) ? stored : 320;
+  });
+  const notesResizeRef = useRef(null);
+
   const containerRef = useRef(null);
   const tooltipRef = useRef(null);
   const selectedTextRef = useRef('');
   const pdfContentRef = useRef(null);
-  
-  // Refs for keyboard navigation to access current values
   const pdfDocumentRef = useRef(null);
   const currentPageRef = useRef(1);
   const totalPagesRef = useRef(0);
 
-  // Load highlights from persistent storage when filePath changes
+  // Load annotations already saved in the PDF whenever the file changes.
   useEffect(() => {
-    // Use validFilePath from component props validation
     if (!validFilePath) {
-      console.log('No valid filePath for loading highlights');
+      setSavedAnnotations([]);
       return;
     }
-    
-    const filePathString = validFilePath;
-    
-    const loadHighlights = async () => {
+    const load = async () => {
       try {
-        // Use the electron API to get document highlights with the string path
-        const storedHighlights = await window.electron.getDocumentHighlights(filePathString);
-        if (storedHighlights && Array.isArray(storedHighlights) && storedHighlights.length > 0) {
-          console.log(`Loaded ${storedHighlights.length} highlights for ${filePath}`);
-          
-          // Create clean, simple highlight objects
-          const cleanHighlights = storedHighlights.map(highlight => ({
-            id: String(highlight.id), // Ensure ID is a string
-            pageNumber: typeof highlight.pageNumber === 'number' ? highlight.pageNumber : Number(highlight.pageNumber),
-            text: typeof highlight.text === 'string' ? highlight.text : String(highlight.text),
-            rectsOnPage: Array.isArray(highlight.rectsOnPage) ? highlight.rectsOnPage.map(rect => ({
-              top: typeof rect.top === 'number' ? rect.top : Number(rect.top),
-              left: typeof rect.left === 'number' ? rect.left : Number(rect.left),
-              width: typeof rect.width === 'number' ? rect.width : Number(rect.width),
-              height: typeof rect.height === 'number' ? rect.height : Number(rect.height)
-            })) : []
-          }));
-          
-          setPersistentHighlights(cleanHighlights);
-        } else {
-          console.log(`No stored highlights found for ${filePath}`);
-          setPersistentHighlights([]);
-        }
+        const annots = await window.electron.getAnnotations(validFilePath);
+        setSavedAnnotations(Array.isArray(annots) ? annots : []);
       } catch (e) {
-        console.error("Failed to load highlights from persistent storage", e);
-        setPersistentHighlights([]);
+        console.error('Failed to load PDF annotations', e);
+        setSavedAnnotations([]);
       }
     };
-    
-    loadHighlights();
+    load();
   }, [validFilePath]);
 
-  // Save highlights to persistent storage whenever they change
-  useEffect(() => {
-    // Use validFilePath from component props validation
-    if (!validFilePath || persistentHighlights.length === 0) {
-      return;
+  const reloadAnnotations = async () => {
+    if (!validFilePath) return;
+    try {
+      const annots = await window.electron.getAnnotations(validFilePath);
+      setSavedAnnotations(Array.isArray(annots) ? annots : []);
+    } catch (e) {
+      console.error('Failed to reload PDF annotations', e);
     }
-    
-    const filePathString = validFilePath;
-    
-    const saveHighlights = async () => {
-      try {
-        // Create a clean copy of highlights to avoid serialization issues
-        const cleanHighlights = persistentHighlights.map(highlight => ({
-          id: String(highlight.id), // Ensure ID is a string
-          pageNumber: highlight.pageNumber,
-          text: highlight.text,
-          rectsOnPage: highlight.rectsOnPage.map(rect => ({
-            top: rect.top,
-            left: rect.left,
-            width: rect.width,
-            height: rect.height
-          }))
-        }));
-        
-        // Use the electron API to save document highlights with the string path
-        await window.electron.saveDocumentHighlights(filePathString, cleanHighlights);
-        console.log(`Saved ${cleanHighlights.length} highlights for ${filePathString}`);
-      } catch (e) {
-        console.error("Failed to save highlights to persistent storage", e);
-      }
-    };
-    
-    // Debounce save to avoid excessive writes
-    const timeoutId = setTimeout(saveHighlights, 500);
-    return () => clearTimeout(timeoutId);
-  }, [persistentHighlights, validFilePath]);
+  };
 
   // Load PDF document when filePath changes
   useEffect(() => {
-    // Force complete state reset - using functional updates to ensure immediate state changes
     setInitialPageLoaded(false);
     setPdfDocument(null);
     setCurrentPage(1);
@@ -127,153 +78,85 @@ const PDFViewer = forwardRef(({ filePath, onTextSelected, pdfContentStyle = {}, 
     setLoading(false);
     setError(null);
     setLoadingStatus('');
-    setPageRenderKey(prev => prev + 1);
-    setPersistentHighlights([]);
-    setActiveHighlightId(null);
+    setPageRenderKey((prev) => prev + 1);
+    setPendingSelection(null);
+    setActiveNoteId(null);
     setSelectionTooltip({ visible: false, text: '', x: 0, y: 0 });
     setPageInputValue('');
     setPageInputError('');
-    
-    // Reset refs as well
+
     pdfDocumentRef.current = null;
     currentPageRef.current = 1;
     totalPagesRef.current = 0;
-    
-    // Use validFilePath from component props validation
+
+    if (onDocumentTextExtracted) onDocumentTextExtracted('');
+
     if (!validFilePath) {
-      console.log('No valid filePath for loading PDF document');
-      setLoading(false); // Ensure loading is false if no file
+      setLoading(false);
       return;
     }
-    
-    // Use the validated path string
-    const filePathString = validFilePath;
-    
-    // Log for debugging
-    console.log('Loading PDF document with path:', filePathString);
-    
+
     const loadPdf = async () => {
       setLoading(true);
       setLoadingStatus('Starting PDF load...');
-      if (onFullTextExtracted) { // Clear any previous full text
-        onFullTextExtracted('');
-      }
-      
+
       try {
-        console.log('Loading PDF from:', filePathString);
-        
-        // Check that PDF.js is loaded
         const pdfjsLib = window.pdfjsLib;
-        if (!pdfjsLib) {
-          throw new Error('PDF.js library not found');
-        }
-        
-        // Read file via preload bridge
+        if (!pdfjsLib) throw new Error('PDF.js library not found');
+
         setLoadingStatus('Reading PDF file...');
-        
-        // Make sure filePathString is really a string at this point
-        if (typeof filePathString !== 'string') {
-          if (filePathString && typeof filePathString === 'object' && filePathString.path) {
-            console.log('Using path property from object in PDFViewer loadPdf:', filePathString.path);
-            filePathString = filePathString.path;
-          } else {
-            console.warn('Converting non-string filePathString to string in PDFViewer loadPdf:', typeof filePathString);
-            filePathString = String(filePathString || '');
-          }
-        }
-        
-        console.log('Calling electron.readPdfFile with clean string path:', filePathString);
-        const base64Data = await window.electron.readPdfFile(filePathString);
-        
-        if (!base64Data) {
-          throw new Error('Could not read PDF file');
-        }
-        
-        if (typeof base64Data !== 'string') {
-          throw new Error(`Invalid data format: ${typeof base64Data}`);
-        }
-        
-        console.log('PDF data loaded, length:', base64Data.length);
+        const base64Data = await window.electron.readPdfFile(validFilePath);
+        if (!base64Data || typeof base64Data !== 'string') throw new Error('Could not read PDF file');
+
         setLoadingStatus('Processing PDF data...');
-        
-        try {
-          // Convert base64 to binary data
-          const binaryData = atob(base64Data);
-          const len = binaryData.length;
-          const bytes = new Uint8Array(len);
-          for (let i = 0; i < len; i++) {
-            bytes[i] = binaryData.charCodeAt(i);
-          }
-          
-          // Load PDF from binary data
-          setLoadingStatus('Loading PDF into viewer...');
-          const loadingTask = pdfjsLib.getDocument({ data: bytes });
-          
-          const document = await loadingTask.promise;
-          console.log('PDF loaded successfully, pages:', document.numPages);
-          
-          setPdfDocument(document);
-          setTotalPages(document.numPages);
-          
-          // Update refs for keyboard navigation
-          pdfDocumentRef.current = document;
-          totalPagesRef.current = document.numPages;
-          
-          // Load last viewed page if not already loaded
-          if (!initialPageLoaded && validFilePath) {
+        const binaryData = atob(base64Data);
+        const bytes = new Uint8Array(binaryData.length);
+        for (let i = 0; i < binaryData.length; i++) bytes[i] = binaryData.charCodeAt(i);
+
+        setLoadingStatus('Loading PDF into viewer...');
+        const document = await pdfjsLib.getDocument({ data: bytes }).promise;
+
+        setPdfDocument(document);
+        setTotalPages(document.numPages);
+        pdfDocumentRef.current = document;
+        totalPagesRef.current = document.numPages;
+
+        // Full-text extraction runs in the background (not awaited) so it never delays the
+        // first page showing; it's used as grounding context for the AI, not for rendering.
+        if (onDocumentTextExtracted) {
+          (async () => {
             try {
-              const lastPage = await window.electron.getLastViewedPage(validFilePath);
-              if (lastPage && lastPage > 1 && lastPage <= document.numPages) {
-                setCurrentPage(lastPage);
-                currentPageRef.current = lastPage;
-                console.log(`Restored last viewed page: ${lastPage}`);
-              } else {
-                setCurrentPage(1);
-                currentPageRef.current = 1;
+              let fullText = '';
+              for (let i = 1; i <= document.numPages; i++) {
+                const page = await document.getPage(i);
+                const textContent = await page.getTextContent();
+                fullText += textContent.items.map((item) => item.str).join(' ') + '\n\n';
               }
+              onDocumentTextExtracted(fullText.trim());
             } catch (e) {
-              console.error('Failed to load last viewed page:', e);
-              setCurrentPage(1);
-              currentPageRef.current = 1;
+              console.error('Failed to extract full document text:', e);
             }
-            setInitialPageLoaded(true);
-          } else {
-            setCurrentPage(1);
-            currentPageRef.current = 1;
-          }
-          
-          setLoadingStatus('');
-
-          // Auto-focus the PDF content container for keyboard navigation
-          setTimeout(() => {
-            if (pdfContentRef.current) {
-              pdfContentRef.current.focus();
-            }
-          }, 100);
-
-          // Extract full text
-          if (onFullTextExtracted) {
-            setLoadingStatus('Extracting text...');
-            let fullText = '';
-            for (let i = 1; i <= document.numPages; i++) {
-              const page = await document.getPage(i);
-              const textContent = await page.getTextContent();
-              const pageText = textContent.items.map(item => item.str).join(' ');
-              fullText += pageText + '\n\n'; // Add double newline between pages
-              setLoadingStatus(`Extracted text from page ${i}/${document.numPages}`);
-            }
-            onFullTextExtracted(fullText.trim());
-            console.log('Full text extracted.');
-            setLoadingStatus('');
-          }
-        } catch (dataError) {
-          console.error('Error processing PDF data:', dataError);
-          throw new Error(`Failed to process PDF data: ${dataError.message}`);
+          })();
         }
 
-      } catch (error) {
-        console.error('Failed to load PDF:', error);
-        setError('Failed to load PDF: ' + error.message);
+        if (!initialPageLoaded && validFilePath) {
+          try {
+            const lastPage = await window.electron.getLastViewedPage(validFilePath);
+            if (lastPage && lastPage > 1 && lastPage <= document.numPages) {
+              setCurrentPage(lastPage);
+              currentPageRef.current = lastPage;
+            }
+          } catch (e) {
+            console.error('Failed to load last viewed page:', e);
+          }
+          setInitialPageLoaded(true);
+        }
+
+        setLoadingStatus('');
+        setTimeout(() => pdfContentRef.current?.focus(), 100);
+      } catch (err) {
+        console.error('Failed to load PDF:', err);
+        setError('Failed to load PDF: ' + err.message);
         setLoadingStatus('Error loading PDF');
       } finally {
         setLoading(false);
@@ -281,37 +164,21 @@ const PDFViewer = forwardRef(({ filePath, onTextSelected, pdfContentStyle = {}, 
     };
 
     loadPdf();
-  }, [validFilePath, onFullTextExtracted]);
+  }, [validFilePath]);
 
-  // Update refs when state changes
-  useEffect(() => {
-    pdfDocumentRef.current = pdfDocument;
-  }, [pdfDocument]);
+  useEffect(() => { pdfDocumentRef.current = pdfDocument; }, [pdfDocument]);
+  useEffect(() => { totalPagesRef.current = totalPages; }, [totalPages]);
 
-  useEffect(() => {
-    totalPagesRef.current = totalPages;
-  }, [totalPages]);
-
-  // Update ref when currentPage changes and save current page
   useEffect(() => {
     currentPageRef.current = currentPage;
-    
     if (!validFilePath || !initialPageLoaded) return;
-    
-    const savePageNumber = async () => {
-      try {
-        await window.electron.saveLastViewedPage(validFilePath, currentPage);
-      } catch (e) {
-        console.error('Failed to save last viewed page:', e);
-      }
-    };
-    
-    // Debounce save to avoid excessive writes
-    const timeoutId = setTimeout(savePageNumber, 500);
+    const timeoutId = setTimeout(() => {
+      window.electron.saveLastViewedPage(validFilePath, currentPage).catch((e) => console.error(e));
+    }, 500);
     return () => clearTimeout(timeoutId);
   }, [currentPage, validFilePath, initialPageLoaded]);
 
-  // Render current page when it changes
+  // Render current page
   useEffect(() => {
     if (!pdfDocument || !containerRef.current) return;
 
@@ -319,69 +186,49 @@ const PDFViewer = forwardRef(({ filePath, onTextSelected, pdfContentStyle = {}, 
       setLoading(true);
       setLoadingStatus(`Rendering page ${currentPage}...`);
       try {
-        // Clear previous content
         const pageContainer = containerRef.current;
         pageContainer.innerHTML = '';
-        
-        // Create canvas element
+
         const canvasWrapper = document.createElement('div');
         canvasWrapper.className = 'canvasWrapper';
         canvasWrapper.style.position = 'relative';
-        
+
         const canvas = document.createElement('canvas');
         canvasWrapper.appendChild(canvas);
         pageContainer.appendChild(canvasWrapper);
 
-        // Get the page
         const page = await pdfDocument.getPage(currentPage);
-        
-        // Set viewport based on scale
         const viewport = page.getViewport({ scale });
-        
-        // Prepare canvas
+
         const context = canvas.getContext('2d');
         canvas.height = viewport.height;
         canvas.width = viewport.width;
-        
-        // Render the page
-        const renderContext = {
-          canvasContext: context,
-          viewport: viewport
-        };
-        
-        await page.render(renderContext).promise;
-        
-        // Add text layer for selection
+
+        await page.render({ canvasContext: context, viewport }).promise;
+
         const textContent = await page.getTextContent();
-        
-        // Create text layer div
         const textLayerDiv = document.createElement('div');
         textLayerDiv.className = 'textLayer';
         textLayerDiv.style.position = 'absolute';
         textLayerDiv.style.top = '0';
         textLayerDiv.style.left = '0';
-        textLayerDiv.style.right = '0';
-        textLayerDiv.style.bottom = '0';
         textLayerDiv.style.width = viewport.width + 'px';
         textLayerDiv.style.height = viewport.height + 'px';
         canvasWrapper.appendChild(textLayerDiv);
-        
-        // Use PDF.js text layer builder
+
         const renderTextLayer = window.pdfjsLib.renderTextLayer({
-          textContent: textContent,
+          textContent,
           container: textLayerDiv,
-          viewport: viewport,
+          viewport,
         });
-        
         await renderTextLayer.promise;
-        
-        // Make text layer selectable
         textLayerDiv.style.pointerEvents = 'auto';
+
         setLoadingStatus('');
-        setPageRenderKey(prevKey => prevKey + 1);
-      } catch (error) {
-        console.error('Error rendering page:', error);
-        setError('Error rendering page: ' + error.message);
+        setPageRenderKey((prevKey) => prevKey + 1);
+      } catch (err) {
+        console.error('Error rendering page:', err);
+        setError('Error rendering page: ' + err.message);
         setLoadingStatus('Error rendering page');
       } finally {
         setLoading(false);
@@ -391,639 +238,384 @@ const PDFViewer = forwardRef(({ filePath, onTextSelected, pdfContentStyle = {}, 
     renderCurrentPage();
   }, [pdfDocument, currentPage, scale]);
 
-  // Effect to render persistent highlights
+  // Render saved + pending highlight overlays for the current page.
   useEffect(() => {
-    if (!pdfDocument || !containerRef.current || !containerRef.current.querySelector('.canvasWrapper')) {
-      return;
-    }
-
-    const canvasWrapper = containerRef.current.querySelector('.canvasWrapper');
+    const canvasWrapper = containerRef.current?.querySelector('.canvasWrapper');
     if (!canvasWrapper) return;
 
-    // Remove old highlight divs for the current page to prevent duplicates
-    const oldHighlightElements = canvasWrapper.querySelectorAll('.persistent-highlight');
-    oldHighlightElements.forEach(el => el.remove());
+    canvasWrapper.querySelectorAll('.pdf-annotation-box').forEach((el) => el.remove());
 
-    const highlightsForCurrentPage = persistentHighlights.filter(
-      h => h.pageNumber === currentPage
-    );
+    const drawBox = (rect, { dashed, color, id, note }) => {
+      const div = document.createElement('div');
+      div.className = 'pdf-annotation-box';
+      div.style.position = 'absolute';
+      div.style.top = `${rect.top * scale}px`;
+      div.style.left = `${rect.left * scale}px`;
+      div.style.width = `${rect.width * scale}px`;
+      div.style.height = `${rect.height * scale}px`;
+      div.style.borderRadius = '0.2em';
+      div.style.zIndex = '3';
+      if (dashed) {
+        div.style.border = `2px dashed ${color}`;
+        div.style.background = `${color}22`;
+        div.style.pointerEvents = 'none';
+      } else {
+        const active = id === activeNoteId;
+        div.style.backgroundColor = active ? 'rgba(255, 215, 0, 0.45)' : color;
+        div.style.mixBlendMode = 'multiply';
+        div.style.cursor = 'pointer';
+        div.style.pointerEvents = 'auto';
+        if (active) div.style.outline = '2px solid #ffd700';
+        div.setAttribute('data-annotation-id', id);
+        div.title = note ? note.slice(0, 120) : '';
+        div.onclick = (e) => {
+          e.stopPropagation();
+          setActiveNoteId(id);
+        };
+      }
+      canvasWrapper.appendChild(div);
+    };
 
-    highlightsForCurrentPage.forEach(highlight => {
-      highlight.rectsOnPage.forEach(rect => {
-        const highlightDiv = document.createElement('div');
-        highlightDiv.className = 'persistent-highlight';
-        if (highlight.id === activeHighlightId) {
-          highlightDiv.classList.add('active-scrolled-highlight');
-        }
-        highlightDiv.style.position = 'absolute';
-        highlightDiv.style.top = `${rect.top * scale}px`;
-        highlightDiv.style.left = `${rect.left * scale}px`;
-        highlightDiv.style.width = `${rect.width * scale}px`;
-        highlightDiv.style.height = `${rect.height * scale}px`;
-        highlightDiv.style.backgroundColor = 'rgba(135, 206, 235, 0.25)'; // Sky blueish from highlight-fixes.css
-        highlightDiv.style.mixBlendMode = 'multiply'; // From highlight-fixes.css
-        highlightDiv.style.pointerEvents = 'none';
-        highlightDiv.style.borderRadius = '0.25em'; // From highlight-fixes.css
-        highlightDiv.style.zIndex = '0'; // Above canvas, potentially under text layer's transparent text
-        highlightDiv.setAttribute('data-highlight-id', highlight.id); 
-        canvasWrapper.appendChild(highlightDiv);
-      });
-    });
-  }, [persistentHighlights, currentPage, scale, pdfDocument, pageRenderKey, activeHighlightId]);
+    savedAnnotations
+      .filter((a) => a.pageNumber === currentPage)
+      .forEach((a) => a.rects.forEach((rect) => drawBox(rect, { dashed: false, color: 'rgba(135, 206, 235, 0.35)', id: a.id, note: a.note })));
 
-  // IMPROVED: Handle text selection with fixed tooltip position
+    if (pendingSelection && pendingSelection.pageNumber === currentPage) {
+      pendingSelection.rects.forEach((rect) => drawBox(rect, { dashed: true, color: '#4da3ff' }));
+    }
+  }, [savedAnnotations, pendingSelection, currentPage, scale, pageRenderKey, activeNoteId]);
+
+  // Text selection handling (prose only; bails if selection isn't inside the PDF text layer).
   useEffect(() => {
     const handleSelectionChange = () => {
       const selection = window.getSelection();
-      // Get raw text, then normalize whitespace
-      const rawSelectedText = selection.toString();
-      // Replace multiple whitespace characters (spaces, tabs, newlines) with a single space
-      const selectedText = rawSelectedText.replace(/\s+/g, ' ').trim();
-      
-      if (selectedText) {
-        // Store selected text for later use
-        selectedTextRef.current = selectedText;
-        
-        // First hide any existing tooltip
-        setSelectionTooltip({ visible: false });
-        
-        // Brief delay before showing new tooltip
-        setTimeout(() => {
-          if (selection.rangeCount > 0) {
-            const range = selection.getRangeAt(0);
-            const rects = range.getClientRects();
-            
-            if (rects.length > 0) {
-              // Get the first line rectangle (first highlighted line)
-              const firstRect = rects[0];
-              
-              // Position tooltip centered at the middle of the first line
-              const x = firstRect.left + (firstRect.width / 2);
-              // Position above the text (with extra spacing)
-              const y = firstRect.top - 56;
-              
-              console.log('Setting tooltip at position:', x, y);
-              
-              // Show tooltip with current selected text
-              setSelectionTooltip({
-                visible: true,
-                text: selectedText,
-                x,
-                y
-              });
-            }
-          }
-        }, 10);
-      }
-    };
-
-    // On mouse up, check for selection
-    const handleMouseUp = () => {
-      const selection = window.getSelection();
-      const selectedText = selection.toString().trim();
+      const selectedText = selection.toString().replace(/\s+/g, ' ').trim();
       if (!selectedText) return;
 
-      // Only show the AI bubble for selections inside the PDF text layer
-      if (selection.rangeCount > 0) {
-        const range = selection.getRangeAt(0);
-        let node = range.startContainer;
-        // if it's a text node, go up to its parent
-        if (node.nodeType === Node.TEXT_NODE) node = node.parentNode;
-        // if this selection isn't within .textLayer, bail out
-        if (!node.closest('.textLayer')) {
-          return;  // let normal browser underline apply elsewhere
-        }
-      }
+      selectedTextRef.current = selectedText;
+      setSelectionTooltip({ visible: false });
 
+      setTimeout(() => {
+        if (selection.rangeCount > 0) {
+          const range = selection.getRangeAt(0);
+          const rects = range.getClientRects();
+          if (rects.length > 0) {
+            const firstRect = rects[0];
+            setSelectionTooltip({
+              visible: true,
+              text: selectedText,
+              x: firstRect.left + firstRect.width / 2,
+              y: firstRect.top - 56,
+            });
+          }
+        }
+      }, 10);
+    };
+
+    const handleMouseUp = () => {
+      if (regionMode) return;
+      const selection = window.getSelection();
+      if (!selection.toString().trim()) return;
+
+      if (selection.rangeCount > 0) {
+        let node = selection.getRangeAt(0).startContainer;
+        if (node.nodeType === Node.TEXT_NODE) node = node.parentNode;
+        if (!node.closest('.textLayer')) return;
+      }
       handleSelectionChange();
     };
-    
-    // Hide tooltip when clicking elsewhere
+
     const handleDocumentClick = (e) => {
-      // Don't hide if clicking on the tooltip itself
-      if (tooltipRef.current && tooltipRef.current.contains(e.target)) {
-        return;
-      }
-      
+      if (tooltipRef.current && tooltipRef.current.contains(e.target)) return;
+      setActiveNoteId(null);
       setTimeout(() => {
         if (!window.getSelection().toString().trim()) {
-          setSelectionTooltip(prev => ({ ...prev, visible: false }));
+          setSelectionTooltip((prev) => ({ ...prev, visible: false }));
         }
       }, 100);
     };
 
     document.addEventListener('mouseup', handleMouseUp);
     document.addEventListener('click', handleDocumentClick);
-    
     return () => {
       document.removeEventListener('mouseup', handleMouseUp);
       document.removeEventListener('click', handleDocumentClick);
     };
-  }, []);
+  }, [regionMode]);
 
-  // FIX: Improved handleAskAI with multiple approaches
-  const handleAskAI = (style) => {
-    try {
-      console.log('Button clicked:', style);
-      
-      const selection = window.getSelection();
-      const text = (selectedTextRef.current || selectionTooltip.text || "").trim();
-      
-      if (!text || !selection.rangeCount) {
-        console.error('No text selected or no range for AI explanation/highlighting');
-        return;
-      }
-      
-      const range = selection.getRangeAt(0);
-      const clientRects = Array.from(range.getClientRects());
-      const canvasWrapper = containerRef.current.querySelector('.canvasWrapper');
+  const handleAskAIForTextSelection = () => {
+    const selection = window.getSelection();
+    const text = (selectedTextRef.current || selectionTooltip.text || '').trim();
+    if (!text || !selection.rangeCount) return;
 
-      if (canvasWrapper && clientRects.length > 0) {
-        const canvasWrapperRect = canvasWrapper.getBoundingClientRect();
-        const rectsOnPage = clientRects.map(rect => ({
-          top: (rect.top - canvasWrapperRect.top) / scale,
-          left: (rect.left - canvasWrapperRect.left) / scale,
-          width: rect.width / scale,
-          height: rect.height / scale,
-        }));
-        const newHighlight = {
-          id: Date.now().toString(), // Convert to string to match schema
-          pageNumber: currentPage,
-          text: text, // Store the actual text for potential future use
-          rectsOnPage: rectsOnPage,
-        };
-        setPersistentHighlights(prevHighlights => [...prevHighlights, newHighlight]);
-        // Pass the newHighlight's id and first rect for scrolling
-        const locationForCallback = { 
-          id: newHighlight.id, 
-          pageNumber: currentPage, 
-          rect: rectsOnPage.length > 0 ? rectsOnPage[0] : null 
-        };
-        // console.log('New highlight created, locationForCallback:', locationForCallback); // For debugging
-
-        // Hide tooltip first
-        setSelectionTooltip({ visible: false });
-        
-        // Reset selection
-        window.getSelection().removeAllRanges();
-        
-        // Delay to ensure UI updates before callback
-        setTimeout(() => {
-          // Call the parent callback
-          if (onTextSelected && typeof onTextSelected === 'function') {
-            console.log('Calling onTextSelected with:', text, style, 'on page', currentPage, 'location:', locationForCallback);
-            onTextSelected(text, style, locationForCallback); // Pass comprehensive location data
-          } else {
-            console.error('onTextSelected is not available');
-          }
-        }, 100);
-      } else { // Added else to handle case where canvasWrapper or clientRects are missing
-        console.error('Could not create highlight: canvasWrapper or clientRects missing.');
-        // Hide tooltip first
-        setSelectionTooltip({ visible: false });
-        // Reset selection
-        window.getSelection().removeAllRanges();
-      }
-    } catch (error) {
-      console.error('Error in handleAskAI:', error);
+    const range = selection.getRangeAt(0);
+    const clientRects = Array.from(range.getClientRects());
+    const canvasWrapper = containerRef.current.querySelector('.canvasWrapper');
+    if (!canvasWrapper || clientRects.length === 0) {
+      setSelectionTooltip({ visible: false });
+      return;
     }
-  };
-  
-  // FIX: Improved close button handler
-  const handleCloseTooltip = (e) => {
-    console.log('Close button clicked');
-    
-    if (e) {
-      e.preventDefault();
-      e.stopPropagation();
-    }
-    
+
+    const canvasWrapperRect = canvasWrapper.getBoundingClientRect();
+    const rectsOnPage = clientRects.map((rect) => ({
+      top: (rect.top - canvasWrapperRect.top) / scale,
+      left: (rect.left - canvasWrapperRect.left) / scale,
+      width: rect.width / scale,
+      height: rect.height / scale,
+    }));
+
+    setPendingSelection({ kind: 'text', pageNumber: currentPage, rects: rectsOnPage, text });
     setSelectionTooltip({ visible: false });
-    
-    // Also clear selection
     window.getSelection().removeAllRanges();
+
+    if (onPassageMarked) onPassageMarked({ kind: 'text', text });
   };
 
-  // Navigation controls
-  const goToPreviousPage = () => {
-    if (currentPage > 1) {
-      setCurrentPage(prevPage => prevPage - 1);
-    }
+  // --- Region (image) selection: drag a rectangle over the rendered page ---
+  const getCanvasWrapper = () => containerRef.current?.querySelector('.canvasWrapper');
+
+  const handleRegionMouseDown = (e) => {
+    if (!regionMode) return;
+    const canvasWrapper = getCanvasWrapper();
+    if (!canvasWrapper) return;
+    const rect = canvasWrapper.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+    setRegionDrag({ startX: x, startY: y, curX: x, curY: y });
   };
 
-  const goToNextPage = () => {
-    if (currentPage < totalPages) {
-      setCurrentPage(prevPage => prevPage + 1);
-    }
+  const handleRegionMouseMove = (e) => {
+    if (!regionMode || !regionDrag) return;
+    const canvasWrapper = getCanvasWrapper();
+    if (!canvasWrapper) return;
+    const rect = canvasWrapper.getBoundingClientRect();
+    setRegionDrag((prev) => ({ ...prev, curX: e.clientX - rect.left, curY: e.clientY - rect.top }));
   };
 
-  const zoomIn = () => {
-    setScale(prevScale => prevScale + 0.2);
+  const handleRegionMouseUp = () => {
+    if (!regionMode || !regionDrag) return;
+    const { startX, startY, curX, curY } = regionDrag;
+    const left = Math.min(startX, curX);
+    const top = Math.min(startY, curY);
+    const width = Math.abs(curX - startX);
+    const height = Math.abs(curY - startY);
+    setRegionDrag(null);
+
+    if (width < 8 || height < 8) return; // too small, ignore accidental clicks
+
+    const canvasWrapper = getCanvasWrapper();
+    const canvas = canvasWrapper?.querySelector('canvas');
+    if (!canvas) return;
+
+    const cropCanvas = document.createElement('canvas');
+    cropCanvas.width = width;
+    cropCanvas.height = height;
+    const ctx = cropCanvas.getContext('2d');
+    ctx.drawImage(canvas, left, top, width, height, 0, 0, width, height);
+    const imageDataUrl = cropCanvas.toDataURL('image/png');
+
+    const rectOnPage = { top: top / scale, left: left / scale, width: width / scale, height: height / scale };
+    setPendingSelection({ kind: 'region', pageNumber: currentPage, rects: [rectOnPage], imageDataUrl });
+    setRegionMode(false);
+
+    if (onPassageMarked) onPassageMarked({ kind: 'region', imageDataUrl });
   };
 
-  const zoomOut = () => {
-    if (scale > 0.5) {
-      setScale(prevScale => prevScale - 0.2);
-    }
-  };
+  const goToPreviousPage = () => currentPage > 1 && setCurrentPage((p) => p - 1);
+  const goToNextPage = () => currentPage < totalPages && setCurrentPage((p) => p + 1);
+  const zoomIn = () => setScale((s) => s + 0.2);
+  const zoomOut = () => setScale((s) => (s > 0.5 ? s - 0.2 : s));
 
   const goToPage = () => {
     const pageNumber = parseInt(pageInputValue, 10);
-    
     if (isNaN(pageNumber) || pageNumber < 1 || pageNumber > totalPages) {
       setPageInputError(`Page ${pageInputValue} doesn't exist. Valid range: 1-${totalPages}`);
       setTimeout(() => setPageInputError(''), 3000);
       return;
     }
-    
     setCurrentPage(pageNumber);
     setPageInputValue('');
     setPageInputError('');
   };
 
-  const handlePageInputKeyPress = (e) => {
-    if (e.key === 'Enter') {
-      goToPage();
-    }
-  };
-
-  // Expose scrollToHighlight method via ref
   useImperativeHandle(ref, () => ({
-    scrollToHighlight: (locationData) => {
-      if (locationData && typeof locationData.pageNumber !== 'undefined' && locationData.id) {
-        const pageNum = parseInt(locationData.pageNumber, 10);
-        if (!isNaN(pageNum) && pageNum >= 1 && pageNum <= totalPages) {
-          
-          const performScrollAndHighlight = () => {
-            const targetHighlightElement = document.querySelector(`.persistent-highlight[data-highlight-id="${locationData.id}"]`);
-            if (targetHighlightElement) {
-              targetHighlightElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
-              setActiveHighlightId(locationData.id); // Set active ID for styling
-
-              // Remove the active class after a delay
-              setTimeout(() => {
-                setActiveHighlightId(null);
-              }, 2000); // Highlight for 2 seconds
-            } else {
-              console.warn('scrollToHighlight: Target highlight element not found on page', pageNum, 'for id', locationData.id);
-            }
-          };
-
-          if (currentPage !== pageNum) {
-            setCurrentPage(pageNum);
-            // Need to wait for page to render, using setTimeout as a temporary measure
-            // A more robust solution might involve a callback or effect after page render
-            setTimeout(performScrollAndHighlight, 500); // Adjust delay as needed
-          } else {
-            // Already on the correct page, scroll immediately
-            performScrollAndHighlight();
-          }
-        } else {
-          console.warn('Invalid page number for scrollToHighlight:', locationData.pageNumber, 'Total pages:', totalPages);
-        }
-      } else {
-        console.warn('scrollToHighlight called without valid pageNumber or id in locationData', locationData);
-      }
-    },
-    removeHighlight: (highlightIdToRemove) => {
-      console.log('PDFViewer: Removing highlight with ID:', highlightIdToRemove);
-      setPersistentHighlights(currentHighlights => {
-        const updatedHighlights = currentHighlights.filter(h => h.id !== highlightIdToRemove);
-        console.log(`PDFViewer: Filtered highlights from ${currentHighlights.length} to ${updatedHighlights.length}`);
-        
-        // Save updated highlights to persistent storage immediately
-        if (validFilePath && updatedHighlights.length !== currentHighlights.length) {
-          console.log('PDFViewer: Saving updated highlights to storage after removal');
-          const saveUpdatedHighlights = async () => {
-            try {
-              const cleanHighlights = updatedHighlights.map(highlight => ({
-                id: String(highlight.id),
-                pageNumber: highlight.pageNumber,
-                text: highlight.text,
-                rectsOnPage: highlight.rectsOnPage.map(rect => ({
-                  top: rect.top,
-                  left: rect.left,
-                  width: rect.width,
-                  height: rect.height
-                }))
-              }));
-              
-              await window.electron.saveDocumentHighlights(validFilePath, cleanHighlights);
-              console.log(`PDFViewer: Saved ${cleanHighlights.length} highlights after removing highlight ${highlightIdToRemove}`);
-            } catch (e) {
-              console.error("PDFViewer: Failed to save highlights after removal", e);
-            }
-          };
-          
-          // Save immediately without debounce since this is a removal
-          saveUpdatedHighlights();
-        }
-        
-        return updatedHighlights;
+    discardPending: () => setPendingSelection(null),
+    commitPendingAsNote: async (noteText) => {
+      if (!pendingSelection || !validFilePath) return { success: false, error: 'Nothing to save' };
+      const result = await window.electron.saveAnnotation(validFilePath, {
+        pageNumber: pendingSelection.pageNumber,
+        kind: pendingSelection.kind,
+        rects: pendingSelection.rects,
+        note: noteText,
       });
-    }
+      if (result.success) {
+        setPendingSelection(null);
+        await reloadAnnotations();
+      }
+      return result;
+    },
+    commitDocumentNote: async (noteText) => {
+      if (!validFilePath) return { success: false, error: 'No document open' };
+      const result = await window.electron.saveDocumentNote(validFilePath, noteText);
+      if (result.success) {
+        await reloadAnnotations();
+      }
+      return result;
+    },
   }));
 
-  // Keyboard navigation - attach to document to ensure it always works
+  // Keyboard navigation
   useEffect(() => {
     const handleKeyDown = (event) => {
-      // Only handle keys when not typing in an input field
-      if (event.target.tagName === 'INPUT' || event.target.tagName === 'TEXTAREA') {
-        return;
-      }
-
-      // Only handle navigation if we have a PDF loaded - use refs for current values
-      if (!pdfDocumentRef.current || totalPagesRef.current === 0) {
-        return;
-      }
-
-      // Only handle navigation if the PDF viewer is focused or visible
-      if (!pdfContentRef.current || !document.contains(pdfContentRef.current)) {
-        return;
-      }
+      if (event.target.tagName === 'INPUT' || event.target.tagName === 'TEXTAREA') return;
+      if (!pdfDocumentRef.current || totalPagesRef.current === 0) return;
+      if (!pdfContentRef.current || !document.contains(pdfContentRef.current)) return;
 
       switch (event.key) {
         case 'ArrowLeft':
         case 'ArrowDown':
         case 'PageUp':
           event.preventDefault();
-          if (currentPageRef.current > 1) {
-            setCurrentPage(currentPageRef.current - 1);
-          }
+          if (currentPageRef.current > 1) setCurrentPage(currentPageRef.current - 1);
           break;
         case 'ArrowRight':
         case 'ArrowUp':
         case 'PageDown':
           event.preventDefault();
-          if (currentPageRef.current < totalPagesRef.current) {
-            setCurrentPage(currentPageRef.current + 1);
-          }
+          if (currentPageRef.current < totalPagesRef.current) setCurrentPage(currentPageRef.current + 1);
           break;
         default:
           break;
       }
     };
-
-    // Add event listener to document instead of specific element
     document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, []);
 
-    return () => {
-      document.removeEventListener('keydown', handleKeyDown);
-    };
-  }, []); // Empty dependency array - only run once on mount
-
-  // Separate effect for auto-focusing the PDF container when PDF loads
   useEffect(() => {
     if (pdfDocument && pdfContentRef.current) {
-      // Auto-focus the PDF content container for keyboard navigation
-      setTimeout(() => {
-        if (pdfContentRef.current) {
-          pdfContentRef.current.focus();
-        }
-      }, 100);
+      setTimeout(() => pdfContentRef.current?.focus(), 100);
     }
   }, [pdfDocument]);
 
-  // Effect to clear active highlight when component unmounts or relevant dependencies change
+  // Notes-column resize handle
+  const handleNotesResizeMouseDown = (e) => {
+    notesResizeRef.current = { startX: e.clientX, startWidth: notesColumnWidth };
+    document.body.style.cursor = 'col-resize';
+    document.addEventListener('mousemove', handleNotesResizeMouseMove);
+    document.addEventListener('mouseup', handleNotesResizeMouseUp);
+  };
+  const handleNotesResizeMouseMove = (e) => {
+    if (!notesResizeRef.current) return;
+    const delta = notesResizeRef.current.startX - e.clientX; // dragging left (toward page) widens the column
+    const next = Math.min(800, Math.max(220, notesResizeRef.current.startWidth + delta));
+    setNotesColumnWidth(next);
+  };
+  const handleNotesResizeMouseUp = () => {
+    notesResizeRef.current = null;
+    document.body.style.cursor = '';
+    document.removeEventListener('mousemove', handleNotesResizeMouseMove);
+    document.removeEventListener('mouseup', handleNotesResizeMouseUp);
+  };
+  useEffect(() => () => {
+    document.removeEventListener('mousemove', handleNotesResizeMouseMove);
+    document.removeEventListener('mouseup', handleNotesResizeMouseUp);
+    document.body.style.cursor = '';
+  }, []);
   useEffect(() => {
-    return () => {
-      setActiveHighlightId(null);
-    };
-  }, []); // Clear on unmount
+    window.localStorage?.setItem('pdfReaderNotesColumnWidth', String(notesColumnWidth));
+  }, [notesColumnWidth]);
 
-  // Re-apply active class if activeHighlightId is set and page changes (or scale changes)
-  // This ensures the class is present if the highlight re-renders
-  useEffect(() => {
-    if (activeHighlightId && containerRef.current) {
-      const canvasWrapper = containerRef.current.querySelector('.canvasWrapper');
-      if (canvasWrapper) {
-        // Remove from any old ones first (though should be handled by highlight removal)
-        const oldActive = canvasWrapper.querySelectorAll('.active-scrolled-highlight');
-        oldActive.forEach(el => el.classList.remove('active-scrolled-highlight'));
-        
-        const targetHighlightElement = canvasWrapper.querySelector(`.persistent-highlight[data-highlight-id="${activeHighlightId}"]`);
-        if (targetHighlightElement) {
-          targetHighlightElement.classList.add('active-scrolled-highlight');
-        }
-      }
-    }
-  }, [activeHighlightId, currentPage, scale, pageRenderKey]); // Dependencies that cause re-render of highlights
+  const buttonStyle = (active) => ({
+    padding: '8px 12px',
+    cursor: 'pointer',
+    background: active ? 'rgba(77, 163, 255, 0.4)' : 'rgba(255, 255, 255, 0.1)',
+    border: active ? '1px solid #4da3ff' : 'none',
+    borderRadius: '8px',
+    color: 'white',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+  });
+
+  const notesForCurrentPage = savedAnnotations.filter((a) => a.pageNumber === currentPage);
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-      {/* Add CSS for placeholder styling */}
-      <style>
-        {`
-          input[type="number"]::-webkit-outer-spin-button,
-          input[type="number"]::-webkit-inner-spin-button {
-            -webkit-appearance: none;
-            margin: 0;
-          }
-          input[type="number"] {
-            -moz-appearance: textfield;
-          }
-          input::placeholder {
-            color: rgba(255, 255, 255, 0.5);
-            opacity: 1;
-          }
-          input::-webkit-input-placeholder {
-            color: rgba(255, 255, 255, 0.5);
-          }
-          input::-moz-placeholder {
-            color: rgba(255, 255, 255, 0.5);
-            opacity: 1;
-          }
-          input:-ms-input-placeholder {
-            color: rgba(255, 255, 255, 0.5);
-          }
-        `}
-      </style>
-      {/* PDF Controls */}
-      <div style={{ 
-        padding: '10px 15px', 
+      <div style={{
+        padding: '10px 15px',
         borderBottom: '1px solid rgba(255, 255, 255, 0.1)',
         display: 'flex',
         gap: '10px',
         backgroundColor: 'rgba(255, 255, 255, 0.05)',
         backdropFilter: 'blur(10px)',
       }}>
-        <button 
-          onClick={goToPreviousPage} 
-          disabled={currentPage <= 1 || loading}
-          style={{ 
-            padding: '8px 12px',
-            cursor: currentPage <= 1 ? 'not-allowed' : 'pointer',
-            background: 'rgba(255, 255, 255, 0.1)',
-            border: 'none',
-            borderRadius: '8px',
-            color: 'white',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            opacity: currentPage <= 1 ? 0.5 : 1,
-          }}
-        >
+        <button onClick={goToPreviousPage} disabled={currentPage <= 1 || loading} style={buttonStyle(false)}>
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <polyline points="15 18 9 12 15 6"></polyline>
           </svg>
         </button>
-        
-        <div style={{ 
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          padding: '0 15px',
-          color: 'rgba(255, 255, 255, 0.9)',
-          fontSize: '0.9rem',
-          background: 'rgba(255, 255, 255, 0.05)',
-          borderRadius: '8px',
-          minWidth: '80px',
-        }}>
+
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '0 15px', color: 'rgba(255, 255, 255, 0.9)', fontSize: '0.9rem', background: 'rgba(255, 255, 255, 0.05)', borderRadius: '8px', minWidth: '80px' }}>
           {currentPage} / {totalPages || '?'}
         </div>
-        
-        <button 
-          onClick={goToNextPage} 
-          disabled={currentPage >= totalPages || loading}
-          style={{ 
-            padding: '8px 12px',
-            cursor: currentPage >= totalPages ? 'not-allowed' : 'pointer',
-            background: 'rgba(255, 255, 255, 0.1)',
-            border: 'none',
-            borderRadius: '8px',
-            color: 'white',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            opacity: currentPage >= totalPages ? 0.5 : 1,
-          }}
-        >
+
+        <button onClick={goToNextPage} disabled={currentPage >= totalPages || loading} style={buttonStyle(false)}>
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <polyline points="9 18 15 12 9 6"></polyline>
           </svg>
         </button>
-        
-        {/* Page input field and go button */}
+
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px', position: 'relative' }}>
           <input
             type="number"
             value={pageInputValue}
             onChange={(e) => setPageInputValue(e.target.value)}
-            onKeyPress={handlePageInputKeyPress}
+            onKeyPress={(e) => e.key === 'Enter' && goToPage()}
             placeholder="Page"
-            min="1"
-            max={totalPages}
-            style={{
-              width: '70px',
-              padding: '8px 10px',
-              background: 'rgba(255, 255, 255, 0.1)',
-              border: '1px solid rgba(255, 255, 255, 0.2)',
-              borderRadius: '8px',
-              color: 'white',
-              fontSize: '0.9rem',
-              textAlign: 'center',
-              outline: 'none',
-              transition: 'all 0.2s ease',
-            }}
-            onFocus={(e) => {
-              e.target.style.background = 'rgba(255, 255, 255, 0.15)';
-              e.target.style.borderColor = 'rgba(255, 255, 255, 0.4)';
-            }}
-            onBlur={(e) => {
-              e.target.style.background = 'rgba(255, 255, 255, 0.1)';
-              e.target.style.borderColor = 'rgba(255, 255, 255, 0.2)';
-            }}
+            style={{ width: '70px', padding: '8px 10px', background: 'rgba(255, 255, 255, 0.1)', border: '1px solid rgba(255, 255, 255, 0.2)', borderRadius: '8px', color: 'white', fontSize: '0.9rem', textAlign: 'center', outline: 'none' }}
             disabled={loading || !totalPages}
           />
-          <button
-            onClick={goToPage}
-            disabled={loading || !totalPages || !pageInputValue}
-            style={{
-              padding: '8px 12px',
-              cursor: (!loading && totalPages && pageInputValue) ? 'pointer' : 'not-allowed',
-              background: 'rgba(255, 255, 255, 0.1)',
-              border: 'none',
-              borderRadius: '8px',
-              color: 'white',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              opacity: (!loading && totalPages && pageInputValue) ? 1 : 0.5,
-            }}
-          >
+          <button onClick={goToPage} disabled={loading || !totalPages || !pageInputValue} style={buttonStyle(false)}>
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <line x1="7" y1="17" x2="17" y2="7"></line>
               <polyline points="7 7 17 7 17 17"></polyline>
             </svg>
           </button>
-          
-          {/* Error message */}
           {pageInputError && (
-            <div style={{
-              position: 'absolute',
-              top: '50%',
-              left: '100%',
-              marginLeft: '10px',
-              transform: 'translateY(-50%)',
-              padding: '8px 12px',
-              background: 'rgba(178, 34, 34, 0.9)',
-              border: '1px solid rgba(255, 255, 255, 0.2)',
-              borderRadius: '8px',
-              color: 'white',
-              fontSize: '0.8rem',
-              whiteSpace: 'nowrap',
-              zIndex: 1000,
-              boxShadow: '0 4px 12px rgba(0, 0, 0, 0.3)',
-            }}>
+            <div style={{ position: 'absolute', top: '50%', left: '100%', marginLeft: '10px', transform: 'translateY(-50%)', padding: '8px 12px', background: 'rgba(178, 34, 34, 0.9)', border: '1px solid rgba(255, 255, 255, 0.2)', borderRadius: '8px', color: 'white', fontSize: '0.8rem', whiteSpace: 'nowrap', zIndex: 1000 }}>
               {pageInputError}
             </div>
           )}
         </div>
-        
+
+        <button
+          onClick={() => visionCapable !== false && setRegionMode((v) => !v)}
+          disabled={visionCapable === false}
+          title={
+            visionCapable === false
+              ? "The selected model doesn't support images — pick a vision-capable model in Settings to mark equations/figures"
+              : 'Drag a rectangle over an equation, figure, or table to mark it'
+          }
+          style={{ ...buttonStyle(regionMode), opacity: visionCapable === false ? 0.4 : 1, cursor: visionCapable === false ? 'not-allowed' : 'pointer' }}
+        >
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <rect x="3" y="3" width="18" height="18" rx="2" strokeDasharray="4 3"></rect>
+          </svg>
+          <span style={{ marginLeft: '6px', fontSize: '0.8rem' }}>{regionMode ? 'Drag to mark region...' : 'Mark region'}</span>
+        </button>
+
         <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: '10px' }}>
-          <button 
-            onClick={zoomOut} 
-            style={{ 
-              padding: '8px 12px',
-              cursor: 'pointer',
-              background: 'rgba(255, 255, 255, 0.1)',
-              border: 'none',
-              borderRadius: '8px',
-              color: 'white',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-            }}
-          >
+          <button onClick={zoomOut} style={buttonStyle(false)}>
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <circle cx="12" cy="12" r="10"></circle>
               <line x1="8" y1="12" x2="16" y2="12"></line>
             </svg>
           </button>
-          
-          <div style={{ 
-            color: 'rgba(255, 255, 255, 0.9)',
-            fontSize: '0.9rem',
-            minWidth: '50px',
-            textAlign: 'center',
-          }}>
+          <div style={{ color: 'rgba(255, 255, 255, 0.9)', fontSize: '0.9rem', minWidth: '50px', textAlign: 'center' }}>
             {Math.round(scale * 100)}%
           </div>
-          
-          <button 
-            onClick={zoomIn} 
-            style={{ 
-              padding: '8px 12px',
-              cursor: 'pointer',
-              background: 'rgba(255, 255, 255, 0.1)',
-              border: 'none',
-              borderRadius: '8px',
-              color: 'white',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-            }}
-          >
+          <button onClick={zoomIn} style={buttonStyle(false)}>
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <circle cx="12" cy="12" r="10"></circle>
               <line x1="12" y1="8" x2="12" y2="16"></line>
@@ -1032,157 +624,67 @@ const PDFViewer = forwardRef(({ filePath, onTextSelected, pdfContentStyle = {}, 
           </button>
         </div>
       </div>
-      
-      {/* Status display */}
+
       {loadingStatus && (
-        <div style={{ 
-          padding: '8px 15px',
-          backgroundColor: 'rgba(44, 83, 100, 0.5)',
-          borderBottom: '1px solid rgba(255, 255, 255, 0.1)',
-          color: 'rgba(255, 255, 255, 0.8)',
-          fontSize: '0.85rem',
-          display: 'flex',
-          alignItems: 'center',
-          gap: '8px',
-        }}>
-          <div style={{
-            width: '16px',
-            height: '16px',
-            borderRadius: '50%',
-            borderTop: '2px solid rgba(255, 255, 255, 0.8)',
-            borderRight: '2px solid transparent',
-            animation: 'spin 1s linear infinite',
-          }}></div>
+        <div style={{ padding: '8px 15px', backgroundColor: 'rgba(44, 83, 100, 0.5)', borderBottom: '1px solid rgba(255, 255, 255, 0.1)', color: 'rgba(255, 255, 255, 0.8)', fontSize: '0.85rem', display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <div style={{ width: '16px', height: '16px', borderRadius: '50%', borderTop: '2px solid rgba(255, 255, 255, 0.8)', borderRight: '2px solid transparent', animation: 'spin 1s linear infinite' }}></div>
           {loadingStatus}
         </div>
       )}
-      
-      {/* PDF Content */}
-      <div 
+
+      <div style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
+      <div
         ref={pdfContentRef}
         tabIndex={0}
-        style={{ 
-          flex: 1, 
-          overflow: 'auto',
-          backgroundColor: '#0c1821',
-          display: 'flex',
-          justifyContent: 'center',
-          alignItems: 'flex-start',
-          padding: '20px',
-          position: 'relative',
-          outline: 'none', // Remove focus outline for better visual experience
-          ...pdfContentStyle,
-        }}>
+        onMouseDown={handleRegionMouseDown}
+        onMouseMove={handleRegionMouseMove}
+        onMouseUp={handleRegionMouseUp}
+        style={{ flex: 1, overflow: 'auto', backgroundColor: '#0c1821', display: 'flex', justifyContent: 'center', alignItems: 'flex-start', padding: '20px', position: 'relative', outline: 'none', cursor: regionMode ? 'crosshair' : 'default' }}
+      >
         {loading && !pdfDocument ? (
-          <div style={{ 
-            padding: '30px', 
-            backgroundColor: 'rgba(255, 255, 255, 0.05)',
-            borderRadius: '12px',
-            backdropFilter: 'blur(10px)',
-            boxShadow: '0 4px 20px rgba(0, 0, 0, 0.2)',
-            border: '1px solid rgba(255, 255, 255, 0.1)',
-            color: 'white',
-            display: 'flex',
-            flexDirection: 'column',
-            alignItems: 'center',
-            gap: '15px',
-          }}>
-            <div style={{
-              width: '40px',
-              height: '40px',
-              borderRadius: '50%',
-              borderTop: '3px solid white',
-              borderRight: '3px solid transparent',
-              animation: 'spin 1s linear infinite',
-            }}></div>
+          <div style={{ padding: '30px', backgroundColor: 'rgba(255, 255, 255, 0.05)', borderRadius: '12px', color: 'white', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '15px' }}>
+            <div style={{ width: '40px', height: '40px', borderRadius: '50%', borderTop: '3px solid white', borderRight: '3px solid transparent', animation: 'spin 1s linear infinite' }}></div>
             <div>{loadingStatus || 'Loading...'}</div>
           </div>
         ) : error ? (
-          <div style={{ 
-            padding: '30px', 
-            backgroundColor: 'rgba(178, 34, 34, 0.1)',
-            borderRadius: '12px',
-            backdropFilter: 'blur(10px)',
-            boxShadow: '0 4px 20px rgba(0, 0, 0, 0.2)',
-            border: '1px solid rgba(255, 255, 255, 0.1)',
-            color: 'white',
-            maxWidth: '500px',
-          }}>
-            <div style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '10px',
-              marginBottom: '15px',
-              color: '#ff6b6b',
-            }}>
-              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <circle cx="12" cy="12" r="10"></circle>
-                <line x1="12" y1="8" x2="12" y2="12"></line>
-                <line x1="12" y1="16" x2="12.01" y2="16"></line>
-              </svg>
-              <h3 style={{ margin: 0 }}>Error Loading PDF</h3>
-            </div>
-            <p style={{ margin: '0 0 15px 0' }}>{error}</p>
-            <p style={{ margin: 0, opacity: 0.8 }}>Make sure you selected a valid PDF file.</p>
+          <div style={{ padding: '30px', backgroundColor: 'rgba(178, 34, 34, 0.1)', borderRadius: '12px', color: 'white', maxWidth: '500px' }}>
+            <h3 style={{ margin: '0 0 15px 0', color: '#ff6b6b' }}>Error Loading PDF</h3>
+            <p style={{ margin: 0 }}>{error}</p>
           </div>
         ) : (
-          <div 
-            ref={containerRef} 
-            style={{ 
-              backgroundColor: 'white',
-              boxShadow: '0 4px 30px rgba(0, 0, 0, 0.3)',
-              borderRadius: '8px',
-              overflow: 'hidden',
-            }}
-          ></div>
+          <div ref={containerRef} style={{ backgroundColor: 'white', boxShadow: '0 4px 30px rgba(0, 0, 0, 0.3)', borderRadius: '8px', overflow: 'hidden', position: 'relative' }}></div>
         )}
-        
-        {/* Selection Tooltip - NEW CIRCULAR DESIGN */}
+
+        {regionDrag && (
+          <div style={{
+            position: 'absolute',
+            border: '2px dashed #4da3ff',
+            background: 'rgba(77, 163, 255, 0.15)',
+            left: Math.min(regionDrag.startX, regionDrag.curX) + (containerRef.current?.offsetLeft || 0),
+            top: Math.min(regionDrag.startY, regionDrag.curY) + (containerRef.current?.offsetTop || 0),
+            width: Math.abs(regionDrag.curX - regionDrag.startX),
+            height: Math.abs(regionDrag.curY - regionDrag.startY),
+            pointerEvents: 'none',
+            zIndex: 5,
+          }} />
+        )}
+
         {selectionTooltip.visible && (
-          <div 
+          <div
             ref={tooltipRef}
-            onMouseDown={e => e.stopPropagation()}
-            onMouseUp={e => e.stopPropagation()}
-            onClick={e => e.stopPropagation()}
+            onMouseDown={(e) => e.stopPropagation()}
+            onMouseUp={(e) => e.stopPropagation()}
+            onClick={(e) => e.stopPropagation()}
             style={{
-              position: 'fixed',
-              left: selectionTooltip.x,
-              top: selectionTooltip.y,
-              width: '44px',
-              height: '44px',
-              backgroundColor: 'rgba(42, 49, 65, 0.95)',
-              border: '1px solid rgba(255, 255, 255, 0.2)',
-              borderRadius: '50%',
-              padding: '0',
-              boxShadow: '0 6px 25px rgba(0, 0, 0, 0.3)',
-              color: 'white',
-              zIndex: 9999,
-              transform: 'translateX(-50%)',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              cursor: 'pointer',
-              pointerEvents: 'auto', 
+              position: 'fixed', left: selectionTooltip.x, top: selectionTooltip.y, width: '44px', height: '44px',
+              backgroundColor: 'rgba(42, 49, 65, 0.95)', border: '1px solid rgba(255, 255, 255, 0.2)', borderRadius: '50%',
+              boxShadow: '0 6px 25px rgba(0, 0, 0, 0.3)', color: 'white', zIndex: 9999, transform: 'translateX(-50%)',
+              display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', pointerEvents: 'auto',
             }}
           >
             <button
-              style={{
-                width: '100%',
-                height: '100%',
-                background: 'transparent',
-                border: 'none',
-                borderRadius: '50%',
-                color: 'white',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                cursor: 'pointer',
-                padding: 0
-              }}
-              onClick={(e) => {
-                e.stopPropagation();
-                handleAskAI('default');
-              }}
+              style={{ width: '100%', height: '100%', background: 'transparent', border: 'none', borderRadius: '50%', color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', padding: 0 }}
+              onClick={(e) => { e.stopPropagation(); handleAskAIForTextSelection(); }}
             >
               <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
@@ -1190,6 +692,18 @@ const PDFViewer = forwardRef(({ filePath, onTextSelected, pdfContentStyle = {}, 
             </button>
           </div>
         )}
+
+      </div>
+
+      <div
+        onMouseDown={handleNotesResizeMouseDown}
+        style={{ width: '6px', flexShrink: 0, cursor: 'col-resize', background: 'rgba(255, 255, 255, 0.06)' }}
+        title="Drag to resize the notes column"
+      />
+
+      <div style={{ width: `${notesColumnWidth}px`, flexShrink: 0, background: 'rgba(255, 255, 255, 0.03)', borderLeft: '1px solid rgba(255, 255, 255, 0.08)' }}>
+        <NotesColumn notes={notesForCurrentPage} activeNoteId={activeNoteId} onHoverNote={setActiveNoteId} />
+      </div>
       </div>
     </div>
   );

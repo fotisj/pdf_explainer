@@ -133,7 +133,7 @@ const LandingPage = ({ onOpenPDF }) => {
           AI PDF Reader
         </h1>
         
-        <p style={{ 
+        <p style={{
           fontSize: '1.1rem',
           textAlign: 'center',
           margin: '0 0 25px 0',
@@ -144,9 +144,9 @@ const LandingPage = ({ onOpenPDF }) => {
           marginLeft: 'auto',
           marginRight: 'auto',
         }}>
-          Transform your PDF reading experience with powerful AI assistance.
-          Highlight text to receive instant explanations and engage in interactive chat sessions.
-          Your highlights and conversations are automatically saved for a seamless experience.
+          Mark a passage — or drag a box over an equation or figure — and ask the AI to explain it.
+          Keep asking it to rephrase until it clicks, then save the explanation as a real note
+          embedded in the PDF itself.
         </p>
         
         {/* Feature cards */}
@@ -164,8 +164,8 @@ const LandingPage = ({ onOpenPDF }) => {
                   <path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"></path>
                 </svg>
               ),
-              title: "Smart AI Explanations",
-              desc: "Get instant explanations by typing your own custom instructions for how the AI should explain the content, with real-time streaming responses."
+              title: "Explains Equations Too",
+              desc: "Most PDF text layers can't select equations or figures. Drag a box over one instead and the AI reads it as an image — works great on arXiv papers."
             },
             {
               icon: (
@@ -173,8 +173,8 @@ const LandingPage = ({ onOpenPDF }) => {
                   <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
                 </svg>
               ),
-              title: "Interactive Chat System",
-              desc: "Ask follow-up questions, create multiple chat sessions for different topics, and maintain a persistent conversation history about any part of your document."
+              title: "Refine Before You Save",
+              desc: "Ask follow-up questions or request a rephrase as many times as you like — nothing is saved until you're happy with the explanation."
             },
             {
               icon: (
@@ -182,8 +182,8 @@ const LandingPage = ({ onOpenPDF }) => {
                   <path d="M9 3H5a2 2 0 0 0-2 2v4m6-6h10a2 2 0 0 1 2 2v4M9 3v18m0 0h10a2 2 0 0 0 2-2V9M9 21H5a2 2 0 0 1-2-2V9m0 0h18"></path>
                 </svg>
               ),
-              title: "Seamless Experience",
-              desc: "Create persistent highlights and annotations, with all your data saved automatically between sessions. Works consistently across Windows, macOS, and Linux."
+              title: "Real PDF Annotations",
+              desc: "Saved explanations are written directly into the PDF file as standard highlight annotations, so they open in Acrobat, Preview, or any other reader too."
             }
           ].map((feature, index) => (
             <div key={index} style={{
@@ -345,33 +345,9 @@ const LandingPage = ({ onOpenPDF }) => {
                 <div 
                   key={doc.path}
                   onClick={(e) => {
-                    e.preventDefault(); // Prevent event propagation
+                    e.preventDefault();
                     e.stopPropagation();
-                    
-                    // Handle opening a recent document - ensure we have valid data
-                    console.log('Recent document clicked:', doc);
-                    
-                    let pathToUse;
-                    
-                    // First try to use the full path if it's a string
-                    if (doc.path && typeof doc.path === 'string' && doc.path.trim() !== '') {
-                      console.log('Using path from recent document:', doc.path);
-                      pathToUse = doc.path;
-                    } 
-                    // If we don't have a valid path, fall back to name
-                    else if (doc.name && typeof doc.name === 'string' && doc.name.trim() !== '') {
-                      console.log('Using name as path:', doc.name);
-                      pathToUse = doc.name;
-                    }
-                    // If we don't have either, use file dialog
-                    else {
-                      console.log('No valid path or name found, opening dialog');
-                      pathToUse = null; // Will cause file dialog to open
-                    }
-                    
-                    // Always pass a clean value (string or null)
-                    // Note: onOpenPDF will handle all state management including Redux updates
-                    onOpenPDF(pathToUse);
+                    onOpenPDF(doc.path || null);
                   }}
                   style={{
                     background: 'rgba(255, 255, 255, 0.1)',
@@ -493,7 +469,7 @@ const LandingPage = ({ onOpenPDF }) => {
           transition: 'opacity 0.6s ease-out',
           transitionDelay: '0.6s',
         }}>
-          <p>AI PDF Reader v1.0.1 by Adrian Rubio • Powered by PDF.js</p>
+          <p>AI PDF Reader • Powered by PDF.js and OpenRouter</p>
         </div>
       </div>
       
