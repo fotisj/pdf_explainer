@@ -53,3 +53,6 @@ out/
 
 # Build statistics
 stats.json
+
+# Local PDFs used for testing
+*.pdf
