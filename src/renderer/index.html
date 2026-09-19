@@ -4,21 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>PDF Explainer</title>
-  <!-- Load PDF.js from CDN -->
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.min.js"></script>
-  <script>
-    // Set PDF.js worker path
-    window.pdfjsLib = window['pdfjs-dist/build/pdf'];
-    if (window.pdfjsLib) {
-      console.log('PDF.js loaded successfully');
-      window.pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.worker.min.js';
-    } else {
-      console.error('Failed to load PDF.js library');
-    }
-  </script>
   <style>
-    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
-    
     body, html {
       margin: 0;
       padding: 0;
