@@ -1,3 +1,4 @@
+require('dotenv').config();
 const { app, BrowserWindow, ipcMain, dialog } = require('electron');
 const path = require('path');
 const fs = require('fs');
@@ -38,7 +39,6 @@ async function initializeStore() {
     const Store = require('electron-store');
     store = new Store({
       schema: {
-        openrouterApiKey: { type: 'string', default: '' },
         openrouterModel: { type: 'string', default: '' },
         recentModels: { type: 'array', default: [], items: { type: 'string' }, maxItems: 8 },
         recentDocuments: {
@@ -82,7 +82,7 @@ function sanitizePathKey(filePath) {
 }
 
 function setupHandlers() {
-  aiService.updateSettings(store.get('openrouterApiKey', ''), store.get('openrouterModel', ''));
+  aiService.updateSettings(process.env.OPENROUTER_API_KEY || '', store.get('openrouterModel', ''));
 
   ipcMain.handle('dialog:openFile', async () => {
     try {
@@ -142,14 +142,13 @@ function setupHandlers() {
   });
 
   ipcMain.handle('settings:get', async () => ({
-    apiKey: store.get('openrouterApiKey', ''),
+    apiKey: process.env.OPENROUTER_API_KEY || '',
     model: store.get('openrouterModel', '') || aiService.getModel(),
     recentModels: store.get('recentModels', []),
   }));
 
-  ipcMain.handle('settings:set', async (event, { apiKey, model }) => {
+  ipcMain.handle('settings:set', async (event, { model }) => {
     try {
-      store.set('openrouterApiKey', apiKey || '');
       store.set('openrouterModel', model || '');
       const trimmedModel = (model || '').trim();
       if (trimmedModel) {
@@ -158,7 +157,7 @@ function setupHandlers() {
         recentModels = [trimmedModel, ...recentModels.filter((m) => m !== trimmedModel)].slice(0, 8);
         store.set('recentModels', recentModels);
       }
-      aiService.updateSettings(apiKey, model);
+      aiService.updateSettings(process.env.OPENROUTER_API_KEY || '', model);
       return { success: true };
     } catch (error) {
       console.error('Error saving settings:', error);

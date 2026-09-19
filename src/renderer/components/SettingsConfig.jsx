@@ -32,9 +32,7 @@ const SettingsConfig = () => {
   const { openrouterApiKey, openrouterModel } = useSelector((state) => state.user.preferences);
   const capabilities = useSelector((state) => state.user.modelCapabilities);
   const [showModal, setShowModal] = useState(false);
-  const [tempApiKey, setTempApiKey] = useState('');
   const [tempModel, setTempModel] = useState('');
-  const [showKey, setShowKey] = useState(false);
   const [tempCapabilities, setTempCapabilities] = useState(null); // capability info for tempModel while editing
   const [recentModels, setRecentModels] = useState([]); // model ids previously saved, most recent first
   const [catalogModels, setCatalogModels] = useState([]); // full OpenRouter model list, fetched lazily
@@ -95,9 +93,9 @@ const SettingsConfig = () => {
   const handleSave = async () => {
     try {
       const model = tempModel.trim() || MODEL_PRESETS[0];
-      dispatch(setOpenrouterSettings({ apiKey: tempApiKey, model }));
+      dispatch(setOpenrouterSettings({ apiKey: openrouterApiKey, model }));
       if (window.electron?.setSettings) {
-        await window.electron.setSettings({ apiKey: tempApiKey, model });
+        await window.electron.setSettings({ model });
       }
       const info = await window.electron.getModelInfo(model).catch(() => null);
       dispatch(setModelCapabilities(info));
@@ -111,7 +109,6 @@ const SettingsConfig = () => {
   const handleCancel = () => setShowModal(false);
 
   const handleOpenModal = () => {
-    setTempApiKey(openrouterApiKey || '');
     setTempModel(openrouterModel || MODEL_PRESETS[0]);
     setTempCapabilities(null);
     setShowModal(true);
@@ -174,49 +171,13 @@ const SettingsConfig = () => {
             </h3>
 
             <p style={{ color: 'rgba(255, 255, 255, 0.8)', fontSize: '0.9rem', marginBottom: '16px', lineHeight: '1.5' }}>
-              Enter your OpenRouter API key. Get one from{' '}
+              The OpenRouter API key is read from the <code>OPENROUTER_API_KEY</code> value in this
+              project's <code>.env</code> file (restart the app after changing it). Get a key from{' '}
               <a href="https://openrouter.ai/keys" target="_blank" rel="noopener noreferrer" style={{ color: '#60a5fa' }}>
                 openrouter.ai/keys
               </a>
-              .
+              . {hasApiKey ? 'A key is currently loaded.' : 'No key is currently set in .env.'}
             </p>
-
-            <div style={{ marginBottom: '16px', position: 'relative' }}>
-              <input
-                type={showKey ? 'text' : 'password'}
-                value={tempApiKey}
-                onChange={(e) => setTempApiKey(e.target.value)}
-                placeholder="sk-or-v1-..."
-                style={{
-                  width: '100%',
-                  padding: '12px',
-                  paddingRight: '45px',
-                  background: 'rgba(0, 0, 0, 0.3)',
-                  border: '1px solid rgba(255, 255, 255, 0.2)',
-                  borderRadius: '8px',
-                  color: 'white',
-                  fontSize: '0.9rem',
-                  outline: 'none',
-                  boxSizing: 'border-box',
-                }}
-              />
-              <button
-                type="button"
-                onClick={() => setShowKey(!showKey)}
-                style={{
-                  position: 'absolute',
-                  right: '10px',
-                  top: '50%',
-                  transform: 'translateY(-50%)',
-                  background: 'none',
-                  border: 'none',
-                  color: 'rgba(255, 255, 255, 0.6)',
-                  cursor: 'pointer',
-                }}
-              >
-                {showKey ? 'Hide' : 'Show'}
-              </button>
-            </div>
 
             <label style={{ color: 'rgba(255, 255, 255, 0.8)', fontSize: '0.85rem', display: 'block', marginBottom: '6px' }}>
               Model (start typing to search the{' '}
@@ -319,15 +280,14 @@ const SettingsConfig = () => {
               </button>
               <button
                 onClick={handleSave}
-                disabled={!tempApiKey.trim()}
                 style={{
-                  background: tempApiKey.trim() ? '#3b82f6' : 'rgba(59, 130, 246, 0.3)',
+                  background: '#3b82f6',
                   color: 'white',
                   border: 'none',
                   borderRadius: '8px',
                   padding: '10px 16px',
                   fontSize: '0.9rem',
-                  cursor: tempApiKey.trim() ? 'pointer' : 'not-allowed',
+                  cursor: 'pointer',
                 }}
               >
                 Save

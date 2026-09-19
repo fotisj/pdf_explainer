@@ -53,10 +53,16 @@ in a separate terminal to launch the app against whatever's currently built.
 
 ### 2. Set up your OpenRouter key
 
-Click the settings button in the header, paste an API key from
-[openrouter.ai/keys](https://openrouter.ai/keys), and pick a model (start typing to search the
-catalog, or reuse a recently-used one). Green badges show whether the selected model supports
-image input and prompt caching.
+Create a `.env` file in the project root with:
+
+```
+OPENROUTER_API_KEY=sk-or-v1-...
+```
+
+Get a key from [openrouter.ai/keys](https://openrouter.ai/keys). The app reads it from `.env` at
+startup, so restart `npm start` after changing it. Click the settings button in the header to pick
+a model (start typing to search the catalog, or reuse a recently-used one) — green badges show
+whether the selected model supports image input and prompt caching.
 
 ### 3. Read and ask
 
