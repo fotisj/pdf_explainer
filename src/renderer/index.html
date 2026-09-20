@@ -66,10 +66,9 @@
 .textLayer > span {
   /* hide PDF.js text layer glyphs, let canvas show through */
   color: transparent !important;
-  /* force uniform metrics */
-  font-family: Arial, sans-serif !important;
-  font-size: 1em !important;
-  line-height: 1.2 !important;
+  /* Font family, size and horizontal stretch are set inline per span by PDF.js so the
+     invisible text lines up exactly with the rendered glyphs. Don't override them here,
+     or selections stop matching what the user sees. */
   position: absolute;
   white-space: pre;
   transform-origin: 0 0;

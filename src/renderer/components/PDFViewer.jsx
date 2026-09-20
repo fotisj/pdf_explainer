@@ -214,6 +214,10 @@ const PDFViewer = forwardRef(({ filePath, onPassageMarked, onDocumentTextExtract
         textLayerDiv.style.left = '0';
         textLayerDiv.style.width = viewport.width + 'px';
         textLayerDiv.style.height = viewport.height + 'px';
+        // PDF.js sizes every text span as calc(var(--total-scale-factor) * <size>px); without
+        // this variable the spans fall back to the inherited font size and drift off the glyphs.
+        textLayerDiv.style.setProperty('--total-scale-factor', String(viewport.scale));
+        textLayerDiv.style.setProperty('--scale-factor', String(viewport.scale));
         canvasWrapper.appendChild(textLayerDiv);
 
         const renderTextLayer = window.pdfjsLib.renderTextLayer({
