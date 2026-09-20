@@ -6,6 +6,17 @@ const openrouterModels = require('../utils/openrouterModels.js');
 let apiKey = null;
 let model = aiConfig.defaultModel;
 let client = null;
+// Free-form text the user adds in Settings; appended to the built-in system prompt.
+let systemPromptAddition = '';
+
+function setSystemPromptAddition(text) {
+  systemPromptAddition = typeof text === 'string' ? text.trim() : '';
+}
+
+function buildSystemPrompt() {
+  if (!systemPromptAddition) return aiConfig.systemPrompt;
+  return `${aiConfig.systemPrompt}\n\nAdditional instructions from the user:\n${systemPromptAddition}`;
+}
 
 function updateSettings(newApiKey, newModel) {
   if (typeof newApiKey === 'string') apiKey = newApiKey;
@@ -167,7 +178,7 @@ async function converseAndStream({ turns, documentText, documentPath }, streamId
   }
 
   const wireMessages = [
-    { role: 'system', content: aiConfig.systemPrompt },
+    { role: 'system', content: buildSystemPrompt() },
     { role: 'user', content: firstContent },
     ...rest.map((turn) => ({ role: turn.role, content: turn.text || '' })),
   ];
@@ -206,7 +217,7 @@ async function summarizeConversation({ turns, documentText, documentPath }) {
   }
 
   const wireMessages = [
-    { role: 'system', content: aiConfig.systemPrompt },
+    { role: 'system', content: buildSystemPrompt() },
     { role: 'user', content: firstContent },
     ...rest.map((turn) => ({ role: turn.role, content: turn.text || '' })),
     { role: 'user', content: aiConfig.abstractPrompt },
@@ -228,4 +239,4 @@ async function summarizeConversation({ turns, documentText, documentPath }) {
   }
 }
 
-module.exports = { updateSettings, getModel, converseAndStream, summarizeConversation };
+module.exports = { updateSettings, getModel, converseAndStream, summarizeConversation, setSystemPromptAddition, buildSystemPrompt };

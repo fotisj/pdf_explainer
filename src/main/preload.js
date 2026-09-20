@@ -7,6 +7,8 @@ contextBridge.exposeInMainWorld('electron', {
   getAnnotations: (filePath) => ipcRenderer.invoke('pdf:getAnnotations', filePath),
   saveAnnotation: (filePath, annotation) => ipcRenderer.invoke('pdf:saveAnnotation', filePath, annotation),
   saveDocumentNote: (filePath, note) => ipcRenderer.invoke('pdf:saveDocumentNote', filePath, note),
+  deleteAnnotation: (filePath, id) => ipcRenderer.invoke('pdf:deleteAnnotation', filePath, id),
+  updateAnnotationNote: (filePath, id, note) => ipcRenderer.invoke('pdf:updateAnnotationNote', filePath, id, note),
 
   getSettings: () => ipcRenderer.invoke('settings:get'),
   setSettings: (settings) => ipcRenderer.invoke('settings:set', settings),

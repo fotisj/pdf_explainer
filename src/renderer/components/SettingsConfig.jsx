@@ -27,12 +27,22 @@ const Badge = ({ ok, label }) => (
   </span>
 );
 
+const sectionTitleStyle = {
+  color: 'white',
+  fontSize: '0.95rem',
+  fontWeight: 600,
+  margin: '18px 0 8px',
+  display: 'flex',
+  alignItems: 'center',
+  gap: '8px',
+};
+
 const SettingsConfig = () => {
   const dispatch = useDispatch();
-  const { openrouterApiKey, openrouterModel } = useSelector((state) => state.user.preferences);
-  const capabilities = useSelector((state) => state.user.modelCapabilities);
+  const { openrouterApiKey, openrouterModel, systemPromptAddition } = useSelector((state) => state.user.preferences);
   const [showModal, setShowModal] = useState(false);
   const [tempModel, setTempModel] = useState('');
+  const [tempPromptAddition, setTempPromptAddition] = useState('');
   const [tempCapabilities, setTempCapabilities] = useState(null); // capability info for tempModel while editing
   const [recentModels, setRecentModels] = useState([]); // model ids previously saved, most recent first
   const [catalogModels, setCatalogModels] = useState([]); // full OpenRouter model list, fetched lazily
@@ -58,7 +68,11 @@ const SettingsConfig = () => {
       try {
         if (window.electron?.getSettings) {
           const settings = await window.electron.getSettings();
-          dispatch(setOpenrouterSettings({ apiKey: settings.apiKey, model: settings.model }));
+          dispatch(setOpenrouterSettings({
+            apiKey: settings.apiKey,
+            model: settings.model,
+            systemPromptAddition: settings.systemPromptAddition || '',
+          }));
           setRecentModels(Array.isArray(settings.recentModels) ? settings.recentModels : []);
           if (settings.model && window.electron?.getModelInfo) {
             const info = await window.electron.getModelInfo(settings.model);
@@ -93,9 +107,10 @@ const SettingsConfig = () => {
   const handleSave = async () => {
     try {
       const model = tempModel.trim() || MODEL_PRESETS[0];
-      dispatch(setOpenrouterSettings({ apiKey: openrouterApiKey, model }));
+      const promptAddition = tempPromptAddition.trim();
+      dispatch(setOpenrouterSettings({ apiKey: openrouterApiKey, model, systemPromptAddition: promptAddition }));
       if (window.electron?.setSettings) {
-        await window.electron.setSettings({ model });
+        await window.electron.setSettings({ model, systemPromptAddition: promptAddition });
       }
       const info = await window.electron.getModelInfo(model).catch(() => null);
       dispatch(setModelCapabilities(info));
@@ -110,6 +125,7 @@ const SettingsConfig = () => {
 
   const handleOpenModal = () => {
     setTempModel(openrouterModel || MODEL_PRESETS[0]);
+    setTempPromptAddition(systemPromptAddition || '');
     setTempCapabilities(null);
     setShowModal(true);
   };
@@ -118,15 +134,30 @@ const SettingsConfig = () => {
 
   return (
     <>
+      <div
+        title={hasApiKey ? 'Model used for explanations' : 'No OpenRouter API key found — open Settings for details'}
+        style={{
+          color: hasApiKey ? 'rgba(255, 255, 255, 0.75)' : '#ef4444',
+          fontSize: '0.85rem',
+          whiteSpace: 'nowrap',
+          overflow: 'hidden',
+          textOverflow: 'ellipsis',
+          maxWidth: '320px',
+        }}
+      >
+        {hasApiKey ? `Model: ${openrouterModel || MODEL_PRESETS[0]}` : 'No API key'}
+      </div>
       <button
         onClick={handleOpenModal}
+        title="Settings"
+        aria-label="Settings"
         style={{
-          background: hasApiKey ? 'rgba(34, 197, 94, 0.2)' : 'rgba(239, 68, 68, 0.2)',
-          color: hasApiKey ? '#22c55e' : '#ef4444',
-          border: `1px solid ${hasApiKey ? '#22c55e' : '#ef4444'}`,
+          background: 'rgba(255, 255, 255, 0.1)',
+          color: 'white',
+          border: hasApiKey ? 'none' : '1px solid #ef4444',
           borderRadius: '8px',
-          padding: '8px 12px',
-          fontSize: '0.85rem',
+          padding: '10px 12px',
+          fontSize: '0.9rem',
           fontWeight: '500',
           cursor: 'pointer',
           display: 'flex',
@@ -134,17 +165,11 @@ const SettingsConfig = () => {
           gap: '8px',
         }}
       >
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
           <circle cx="12" cy="12" r="3"></circle>
           <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
         </svg>
-        {hasApiKey ? `Model: ${openrouterModel || MODEL_PRESETS[0]}` : 'Set up OpenRouter'}
-        {hasApiKey && capabilities.checked && capabilities.found && (
-          <span style={{ display: 'flex', gap: '4px' }}>
-            <Badge ok={!!capabilities.supportsImages} label="vision" />
-            <Badge ok={!!capabilities.supportsCaching} label="cache" />
-          </span>
-        )}
+        Settings
       </button>
 
       {showModal && (
@@ -153,22 +178,29 @@ const SettingsConfig = () => {
           <div
             style={{
               position: 'fixed',
-              top: '120px',
+              top: '80px',
               left: '50%',
+              maxHeight: 'calc(100vh - 120px)',
+              overflowY: 'auto',
+              boxSizing: 'border-box',
               transform: 'translateX(-50%)',
               background: 'linear-gradient(135deg, #1f2937, #374151)',
               borderRadius: '12px',
               padding: '24px',
               width: '90%',
-              maxWidth: '520px',
+              maxWidth: '560px',
               border: '1px solid rgba(255, 255, 255, 0.1)',
               boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.5)',
               zIndex: 1001,
             }}
           >
             <h3 style={{ color: 'white', marginTop: 0, marginBottom: '16px', fontSize: '1.2rem', fontWeight: '600' }}>
-              OpenRouter Settings
+              Settings
             </h3>
+
+            <div style={sectionTitleStyle}>
+              OpenRouter API key <Badge ok={hasApiKey} label={hasApiKey ? 'key loaded' : 'no key found'} />
+            </div>
 
             <p style={{ color: 'rgba(255, 255, 255, 0.8)', fontSize: '0.9rem', marginBottom: '16px', lineHeight: '1.5' }}>
               The OpenRouter API key is read from the <code>OPENROUTER_API_KEY</code> value in this
@@ -176,8 +208,10 @@ const SettingsConfig = () => {
               <a href="https://openrouter.ai/keys" target="_blank" rel="noopener noreferrer" style={{ color: '#60a5fa' }}>
                 openrouter.ai/keys
               </a>
-              . {hasApiKey ? 'A key is currently loaded.' : 'No key is currently set in .env.'}
+              .
             </p>
+
+            <div style={sectionTitleStyle}>Model</div>
 
             <label style={{ color: 'rgba(255, 255, 255, 0.8)', fontSize: '0.85rem', display: 'block', marginBottom: '6px' }}>
               Model (start typing to search the{' '}
@@ -262,6 +296,33 @@ const SettingsConfig = () => {
               earlier sections — pick a model with both badges checked to keep that affordable across a
               reading session. Without caching, every explanation and follow-up re-bills the full paper.
             </p>
+
+            <div style={sectionTitleStyle}>Additional instructions for the AI</div>
+            <p style={{ color: 'rgba(255, 255, 255, 0.6)', fontSize: '0.8rem', marginTop: 0, marginBottom: '8px', lineHeight: '1.5' }}>
+              This text is appended to the built-in system prompt for every explanation, follow-up and
+              document question. It is kept across sessions and applies to all papers.
+            </p>
+            <textarea
+              value={tempPromptAddition}
+              onChange={(e) => setTempPromptAddition(e.target.value)}
+              rows={5}
+              placeholder="e.g. Spell out each step of a derivation and define every symbol before using it."
+              style={{
+                width: '100%',
+                padding: '12px',
+                background: 'rgba(0, 0, 0, 0.3)',
+                border: '1px solid rgba(255, 255, 255, 0.2)',
+                borderRadius: '8px',
+                color: 'white',
+                fontSize: '0.9rem',
+                lineHeight: '1.5',
+                outline: 'none',
+                boxSizing: 'border-box',
+                resize: 'vertical',
+                fontFamily: 'inherit',
+                marginBottom: '20px',
+              }}
+            />
 
             <div style={{ display: 'flex', gap: '12px', justifyContent: 'flex-end' }}>
               <button

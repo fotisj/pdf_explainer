@@ -1,31 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import ReactMarkdown from 'react-markdown';
-import remarkMath from 'remark-math';
-import rehypeKatex from 'rehype-katex';
-import 'katex/dist/katex.min.css';
+import MarkdownContent from './MarkdownContent';
 
 const uuid = () => Math.random().toString(36).substr(2, 9);
-
-// Keeps markdown output visually consistent with the app's inline-styled, dark theme (there are
-// no CSS classes elsewhere to hook into, and the elements react-markdown produces would
-// otherwise pick up the browser's default light-mode margins/colors).
-const markdownComponents = {
-  p: ({ node, ...props }) => <p style={{ margin: '0 0 10px' }} {...props} />,
-  h1: ({ node, ...props }) => <h1 style={{ fontSize: '1.1rem', margin: '12px 0 6px', fontWeight: 700 }} {...props} />,
-  h2: ({ node, ...props }) => <h2 style={{ fontSize: '1.05rem', margin: '12px 0 6px', fontWeight: 700 }} {...props} />,
-  h3: ({ node, ...props }) => <h3 style={{ fontSize: '1rem', margin: '10px 0 6px', fontWeight: 700 }} {...props} />,
-  ul: ({ node, ...props }) => <ul style={{ margin: '4px 0 10px', paddingLeft: '22px' }} {...props} />,
-  ol: ({ node, ...props }) => <ol style={{ margin: '4px 0 10px', paddingLeft: '22px' }} {...props} />,
-  li: ({ node, ...props }) => <li style={{ marginBottom: '4px' }} {...props} />,
-  a: ({ node, ...props }) => <a target="_blank" rel="noopener noreferrer" style={{ color: '#60a5fa' }} {...props} />,
-  blockquote: ({ node, ...props }) => (
-    <blockquote style={{ margin: '6px 0', paddingLeft: '10px', borderLeft: '3px solid rgba(255,255,255,0.2)', color: 'rgba(255,255,255,0.75)' }} {...props} />
-  ),
-  pre: ({ node, ...props }) => <pre style={{ overflowX: 'auto', margin: '6px 0' }} {...props} />,
-  code: ({ node, ...props }) => (
-    <code style={{ background: 'rgba(255,255,255,0.1)', padding: '2px 6px', borderRadius: '4px', fontSize: '0.85em', fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace' }} {...props} />
-  ),
-};
 
 const defaultPromptFor = (selection) => {
   if (!selection) return '';
@@ -101,9 +77,30 @@ const AIPanel = ({ mode = 'passage', pendingSelection, documentText, documentPat
     if (!pendingSelection || pendingSelection === lastSelectionRef.current) return;
     lastSelectionRef.current = pendingSelection;
 
+    setAbstractDraft(null);
+    setInputMessage('');
+
+    const existingNote = pendingSelection.existingNote?.note?.trim();
+    if (existingNote) {
+      // Reopening a saved note: replay the original prompt and the saved explanation as the
+      // conversation so far, so a follow-up question has its context and goes straight to input.
+      const prompt = defaultPromptFor(pendingSelection);
+      initialTurnRef.current = {
+        text: prompt,
+        imageDataUrl: pendingSelection.kind === 'region' ? pendingSelection.imageDataUrl : undefined,
+      };
+      setMessages([
+        { id: uuid(), role: 'user', content: prompt, seeded: true },
+        { id: uuid(), role: 'assistant', content: existingNote, seeded: true },
+      ]);
+      setComposerText('');
+      setAwaitingSend(false);
+      setTimeout(() => inputRef.current?.focus(), 0);
+      return;
+    }
+
     setMessages([]);
     initialTurnRef.current = null;
-    setAbstractDraft(null);
     setComposerText(defaultPromptFor(pendingSelection));
     setAwaitingSend(true);
     setTimeout(() => composerRef.current?.focus(), 0);
@@ -143,6 +140,17 @@ const AIPanel = ({ mode = 'passage', pendingSelection, documentText, documentPat
     window.electron.aiConverse({ turns, documentText, documentPath }, streamId);
   };
 
+  // Saves the marked passage as a plain highlight without asking the AI anything.
+  const handleMarkOnly = async () => {
+    setIsSaving(true);
+    try {
+      const result = await onSaveNote('');
+      if (!result?.success) console.error('Failed to save mark:', result?.error);
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
   const handleSendInitial = () => {
     if (!composerText.trim()) return;
     setAwaitingSend(false);
@@ -176,11 +184,13 @@ const AIPanel = ({ mode = 'passage', pendingSelection, documentText, documentPat
   };
 
   const handleSave = async () => {
-    const lastAssistant = [...messages].reverse().find((m) => m.role === 'assistant' && !m.isError);
+    const lastAssistant = [...messages].reverse().find((m) => m.role === 'assistant' && !m.isError && !m.seeded);
     if (!lastAssistant || !lastAssistant.content || lastAssistant.content === '…') return;
+    const idx = messages.indexOf(lastAssistant);
+    const question = idx > 0 && messages[idx - 1].role === 'user' ? messages[idx - 1].content : undefined;
     setIsSaving(true);
     try {
-      const result = await onSaveNote(lastAssistant.content);
+      const result = await onSaveNote(lastAssistant.content, { question });
       if (!result?.success) {
         console.error('Failed to save note:', result?.error);
       }
@@ -212,7 +222,7 @@ const AIPanel = ({ mode = 'passage', pendingSelection, documentText, documentPat
     if (!text) return;
     setIsSaving(true);
     try {
-      const result = await onSaveNote(text);
+      const result = await onSaveNote(text, { replace: true });
       if (result?.success) {
         setAbstractDraft(null);
       } else {
@@ -223,13 +233,14 @@ const AIPanel = ({ mode = 'passage', pendingSelection, documentText, documentPat
     }
   };
 
-  const hasSavableAnswer = messages.some((m) => m.role === 'assistant' && m.content && m.content !== '…' && !m.isError);
+  const isContinuingNote = Boolean(pendingSelection?.existingNote);
+  const hasSavableAnswer = messages.some((m) => m.role === 'assistant' && m.content && m.content !== '…' && !m.isError && !m.seeded);
 
   return (
     <div style={{ height: '100%', display: 'flex', flexDirection: 'column', backgroundColor: 'rgba(15, 32, 39, 0.95)', backdropFilter: 'blur(10px)' }}>
       <div style={{ padding: '15px', borderBottom: '1px solid rgba(255, 255, 255, 0.1)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: 'rgba(44, 83, 100, 0.4)' }}>
         <h3 style={{ margin: 0, fontWeight: 600, fontSize: '1.05rem', color: 'white' }}>
-          {isDocumentMode ? 'Ask about this document' : 'Explain passage'}
+          {isDocumentMode ? 'Ask about this document' : isContinuingNote ? 'Continue note' : 'Explain passage'}
         </h3>
         <button
           onClick={onClose}
@@ -275,23 +286,43 @@ const AIPanel = ({ mode = 'passage', pendingSelection, documentText, documentPat
                 fontFamily: 'inherit',
               }}
             />
-            <button
-              onClick={handleSendInitial}
-              disabled={!composerText.trim()}
-              style={{
-                alignSelf: 'flex-end',
-                padding: '9px 18px',
-                background: composerText.trim() ? 'linear-gradient(135deg, #2c5364, #203a43)' : 'rgba(44, 83, 100, 0.3)',
-                color: 'white',
-                border: 'none',
-                borderRadius: '6px',
-                fontWeight: 600,
-                fontSize: '0.85rem',
-                cursor: composerText.trim() ? 'pointer' : 'not-allowed',
-              }}
-            >
-              Explain
-            </button>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
+              {!isDocumentMode && !isContinuingNote && (
+                <button
+                  onClick={handleMarkOnly}
+                  disabled={isSaving}
+                  title="Save this as a plain mark in the PDF without asking the AI"
+                  style={{
+                    padding: '9px 18px',
+                    background: 'rgba(255, 255, 255, 0.08)',
+                    color: 'white',
+                    border: '1px solid rgba(255, 255, 255, 0.15)',
+                    borderRadius: '6px',
+                    fontWeight: 600,
+                    fontSize: '0.85rem',
+                    cursor: isSaving ? 'not-allowed' : 'pointer',
+                  }}
+                >
+                  {isSaving ? 'Saving…' : 'Mark only'}
+                </button>
+              )}
+              <button
+                onClick={handleSendInitial}
+                disabled={!composerText.trim() || isSaving}
+                style={{
+                  padding: '9px 18px',
+                  background: composerText.trim() ? 'linear-gradient(135deg, #2c5364, #203a43)' : 'rgba(44, 83, 100, 0.3)',
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: '6px',
+                  fontWeight: 600,
+                  fontSize: '0.85rem',
+                  cursor: composerText.trim() ? 'pointer' : 'not-allowed',
+                }}
+              >
+                Explain
+              </button>
+            </div>
           </div>
         ) : messages.length === 0 ? (
           <div style={{ textAlign: 'center', color: 'rgba(255, 255, 255, 0.5)', fontSize: '0.9rem', padding: '20px', fontStyle: 'italic', flexGrow: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
@@ -313,9 +344,7 @@ const AIPanel = ({ mode = 'passage', pendingSelection, documentText, documentPat
                 fontSize: '0.9rem',
                 lineHeight: '1.5',
               }}>
-                <ReactMarkdown remarkPlugins={[remarkMath]} rehypePlugins={[rehypeKatex]} components={markdownComponents}>
-                  {message.content}
-                </ReactMarkdown>
+                <MarkdownContent>{message.content}</MarkdownContent>
               </div>
             </div>
           ))
@@ -326,7 +355,7 @@ const AIPanel = ({ mode = 'passage', pendingSelection, documentText, documentPat
         {abstractDraft !== null ? (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginBottom: '10px' }}>
             <div style={{ color: 'rgba(255, 255, 255, 0.6)', fontSize: '0.8rem' }}>
-              Review the abstract, then save it as the note:
+              {isContinuingNote ? 'Review the abstract; saving it replaces the existing note:' : 'Review the abstract, then save it as the note:'}
             </div>
             <textarea
               value={abstractDraft}
@@ -378,7 +407,7 @@ const AIPanel = ({ mode = 'passage', pendingSelection, documentText, documentPat
                   cursor: (isSaving || !abstractDraft.trim()) ? 'not-allowed' : 'pointer',
                 }}
               >
-                {isSaving ? 'Saving…' : 'Save abstract'}
+                {isSaving ? 'Saving…' : isContinuingNote ? 'Replace note' : 'Save abstract'}
               </button>
             </div>
           </div>
@@ -398,12 +427,12 @@ const AIPanel = ({ mode = 'passage', pendingSelection, documentText, documentPat
                 cursor: (!hasSavableAnswer || isStreaming || isSaving || isAbstracting) ? 'not-allowed' : 'pointer',
               }}
             >
-              {isSaving ? 'Saving…' : isDocumentMode ? 'Save as note (end of doc)' : 'Save as note'}
+              {isSaving ? 'Saving…' : isDocumentMode ? 'Save as note (end of doc)' : isContinuingNote ? 'Add to note' : 'Save as note'}
             </button>
             <button
               onClick={handleAbstract}
               disabled={!hasSavableAnswer || isStreaming || isSaving || isAbstracting}
-              title="Condense the whole discussion into a short abstract, for review before saving"
+              title={isContinuingNote ? 'Condense the whole discussion into a short abstract that replaces the saved note' : 'Condense the whole discussion into a short abstract, for review before saving'}
               style={{
                 flex: 1,
                 padding: '10px',
@@ -425,7 +454,7 @@ const AIPanel = ({ mode = 'passage', pendingSelection, documentText, documentPat
             value={inputMessage}
             onChange={(e) => setInputMessage(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder={isDocumentMode && messages.length === 0 ? 'Ask a question about this document…' : 'Ask a follow-up, or ask the AI to rephrase...'}
+            placeholder={isDocumentMode && messages.length === 0 ? 'Ask a question about this document…' : isContinuingNote ? 'Ask a new question about this passage…' : 'Ask a follow-up, or ask the AI to rephrase...'}
             style={{ flex: 1, background: 'transparent', border: 'none', color: 'white', resize: 'none', outline: 'none', fontSize: '0.85rem', lineHeight: '1.4', minHeight: '24px', maxHeight: '100px', fontFamily: 'inherit' }}
             rows={1}
             disabled={isStreaming || (!isDocumentMode && !pendingSelection)}

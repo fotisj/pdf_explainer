@@ -13,7 +13,9 @@ const aiConfig = {
     "the paper's own terminology, notation, and prior definitions, at a level a knowledgeable but " +
     'non-expert reader can follow. Be concise; do not restate the passage before explaining it. If ' +
     'the user then asks follow-up questions or requests a rephrase, respond directly to their latest ' +
-    'message, still using the paper as context.',
+    'message, still using the paper as context. Write in Markdown. For mathematics use LaTeX with ' +
+    'dollar delimiters only: $…$ for inline math and $$…$$ for display math (never \\( \\) or \\[ \\]). ' +
+    'Your answers may be saved verbatim as PDF annotations, so keep the Markdown light.',
   abstractPrompt:
     'Summarize the key insight or conclusion reached in this discussion in 2-3 concise sentences, ' +
     'written as a standalone note that will be attached to the marked passage in the PDF. State the ' +

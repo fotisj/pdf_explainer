@@ -7,6 +7,9 @@ const { PDFDocument, PDFName, PDFHexString } = require('pdf-lib');
 
 const HIGHLIGHT_COLOR = [1, 0.92, 0.4]; // pale yellow
 const REGION_COLOR = [0.3, 0.6, 1]; // blue border
+// Private key holding the marked passage's text so a saved note can later be reopened for
+// follow-up questions without re-extracting it from the page.
+const PASSAGE_KEY = 'PDFExplainerPassage';
 
 // Converts a top-left-origin rect (CSS px at scale 1 == PDF points) to a bottom-left-origin
 // PDF [x1, y1, x2, y2] rect. Does not account for page /Rotate.
@@ -62,7 +65,7 @@ function makePopup(context, parentRef, rect, contents) {
 
 // Shared by saveAnnotation and saveDocumentNote: builds the Highlight/Square annotation dict
 // plus its linked Popup, registers both, and appends the annotation to the given page.
-function writeAnnotation(pdfDoc, page, { kind, rects, note }) {
+function writeAnnotation(pdfDoc, page, { kind, rects, note, text }) {
   const { height: pageHeight } = page.getSize();
   const context = pdfDoc.context;
   const id = crypto.randomUUID();
@@ -104,6 +107,7 @@ function writeAnnotation(pdfDoc, page, { kind, rects, note }) {
       F: 4,
     });
   }
+  if (text) annotDict.set(PDFName.of(PASSAGE_KEY), PDFHexString.fromText(text));
   const annotRef = context.register(annotDict);
 
   const popupRect = [boundingRect[2], boundingRect[3], boundingRect[2] + 200, boundingRect[3] + 100];
@@ -121,14 +125,15 @@ function writeAnnotation(pdfDoc, page, { kind, rects, note }) {
  * @param {number} annotation.pageNumber 1-indexed
  * @param {'text'|'region'} annotation.kind
  * @param {{top:number,left:number,width:number,height:number}[]} annotation.rects PDF-point space, top-left origin (one rect per line for 'text', exactly one for 'region')
- * @param {string} annotation.note
+ * @param {string} annotation.note may be empty for a plain mark without explanation
+ * @param {string} [annotation.text] the marked passage's text (for 'text' kind)
  * @returns {Promise<string>} the id assigned to the new annotation
  */
-async function saveAnnotation(filePath, { pageNumber, kind, rects, note }) {
+async function saveAnnotation(filePath, { pageNumber, kind, rects, note, text }) {
   const pdfDoc = await loadPdf(filePath);
   const page = pdfDoc.getPage(pageNumber - 1);
 
-  const id = writeAnnotation(pdfDoc, page, { kind, rects, note });
+  const id = writeAnnotation(pdfDoc, page, { kind, rects, note: note || '', text });
 
   const savedBytes = await pdfDoc.save();
   fs.writeFileSync(filePath, savedBytes);
@@ -193,7 +198,9 @@ async function getAnnotations(filePath) {
 
       const nmObj = dict.get(PDFName.of('NM'));
       const contentsObj = dict.get(PDFName.of('Contents'));
+      const passageObj = dict.get(PDFName.of(PASSAGE_KEY));
       const note = contentsObj && typeof contentsObj.decodeText === 'function' ? contentsObj.decodeText() : '';
+      const text = passageObj && typeof passageObj.decodeText === 'function' ? passageObj.decodeText() : '';
       const id = nmObj && typeof nmObj.decodeText === 'function' ? nmObj.decodeText() : `${i}-${j}`;
 
       let rects = [];
@@ -225,6 +232,7 @@ async function getAnnotations(filePath) {
         kind: subtypeName === 'Highlight' ? 'text' : 'region',
         rects,
         note,
+        text,
       });
     }
   }
@@ -232,4 +240,77 @@ async function getAnnotations(filePath) {
   return results;
 }
 
-module.exports = { saveAnnotation, saveDocumentNote, getAnnotations };
+// Locates the annotation whose /NM equals id. Returns null if not found.
+function findAnnotation(pdfDoc, id) {
+  for (let i = 0; i < pdfDoc.getPageCount(); i++) {
+    const page = pdfDoc.getPage(i);
+    const annots = page.node.Annots();
+    if (!annots) continue;
+    for (let j = 0; j < annots.size(); j++) {
+      const ref = annots.get(j);
+      const dict = pdfDoc.context.lookup(ref);
+      if (!dict || typeof dict.get !== 'function') continue;
+      const nmObj = dict.get(PDFName.of('NM'));
+      if (nmObj && typeof nmObj.decodeText === 'function' && nmObj.decodeText() === id) {
+        return { page, annots, index: j, ref, dict };
+      }
+    }
+  }
+  return null;
+}
+
+/**
+ * Removes the annotation with the given id (and any Popup that points at it) from the PDF.
+ * @param {string} filePath
+ * @param {string} id
+ */
+async function deleteAnnotation(filePath, id) {
+  const pdfDoc = await loadPdf(filePath);
+  const found = findAnnotation(pdfDoc, id);
+  if (!found) throw new Error('Annotation not found');
+  const { annots, ref } = found;
+
+  // Walk backwards so removing entries doesn't shift indices we still have to visit.
+  for (let j = annots.size() - 1; j >= 0; j--) {
+    const entryRef = annots.get(j);
+    if (entryRef === ref) {
+      annots.remove(j);
+      continue;
+    }
+    const entry = pdfDoc.context.lookup(entryRef);
+    if (entry && typeof entry.get === 'function' && entry.get(PDFName.of('Parent')) === ref) {
+      annots.remove(j);
+      pdfDoc.context.delete(entryRef);
+    }
+  }
+  const popupRef = found.dict.get(PDFName.of('Popup'));
+  if (popupRef) pdfDoc.context.delete(popupRef);
+  pdfDoc.context.delete(ref);
+
+  const savedBytes = await pdfDoc.save();
+  fs.writeFileSync(filePath, savedBytes);
+}
+
+/**
+ * Replaces the note text of an existing annotation (its /Contents and that of its Popup).
+ * @param {string} filePath
+ * @param {string} id
+ * @param {string} note
+ */
+async function updateAnnotationNote(filePath, id, note) {
+  const pdfDoc = await loadPdf(filePath);
+  const found = findAnnotation(pdfDoc, id);
+  if (!found) throw new Error('Annotation not found');
+
+  const contentsText = PDFHexString.fromText(note || '');
+  found.dict.set(PDFName.of('Contents'), contentsText);
+  found.dict.set(PDFName.of('M'), pdfDoc.context.obj(new Date().toISOString()));
+  const popupRef = found.dict.get(PDFName.of('Popup'));
+  const popup = popupRef ? pdfDoc.context.lookup(popupRef) : null;
+  if (popup && typeof popup.set === 'function') popup.set(PDFName.of('Contents'), contentsText);
+
+  const savedBytes = await pdfDoc.save();
+  fs.writeFileSync(filePath, savedBytes);
+}
+
+module.exports = { saveAnnotation, saveDocumentNote, getAnnotations, deleteAnnotation, updateAnnotationNote };

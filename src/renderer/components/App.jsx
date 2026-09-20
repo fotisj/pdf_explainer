@@ -5,6 +5,7 @@ import LandingPage from './LandingPage';
 import PDFViewer from './PDFViewer';
 import AIPanel from './AIPanel';
 import SettingsConfig from './SettingsConfig';
+import { normalizeMathDelimiters } from '../utils/noteText';
 
 const App = () => {
   const [pdfPath, setPdfPath] = useState(null);
@@ -51,8 +52,24 @@ const App = () => {
     setShowAIPanel(false);
   };
 
-  const handleSaveNote = async (noteText) => {
-    const result = await pdfViewerRef.current?.commitPendingAsNote(noteText);
+  // Saves from the passage panel. A fresh mark becomes a new annotation; a follow-up on a saved
+  // note appends "Q: … / answer" to that note (or replaces it, for an abstract of the discussion).
+  const handleSaveNote = async (rawNoteText, { question, replace } = {}) => {
+    const noteText = normalizeMathDelimiters(rawNoteText);
+    const existing = pendingSelection?.existingNote;
+    let result;
+    if (existing) {
+      let next;
+      if (replace || !existing.note.trim()) {
+        next = noteText;
+      } else {
+        const qLine = question ? `Q: ${question}\n\n` : '';
+        next = `${existing.note.trimEnd()}\n\n---\n\n${qLine}${noteText}`;
+      }
+      result = await pdfViewerRef.current?.updateNote(existing.id, next);
+    } else {
+      result = await pdfViewerRef.current?.commitPendingAsNote(noteText);
+    }
     if (result?.success) {
       setPendingSelection(null);
       setShowAIPanel(false);
@@ -61,7 +78,7 @@ const App = () => {
   };
 
   const handleSaveDocumentNote = async (noteText) => {
-    const result = await pdfViewerRef.current?.commitDocumentNote(noteText);
+    const result = await pdfViewerRef.current?.commitDocumentNote(normalizeMathDelimiters(noteText));
     return result;
   };
 

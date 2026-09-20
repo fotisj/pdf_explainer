@@ -343,36 +343,135 @@ const PDFViewer = forwardRef(({ filePath, onPassageMarked, onDocumentTextExtract
     };
   }, [regionMode]);
 
-  const handleAskAIForTextSelection = () => {
+  const getCanvasWrapper = () => containerRef.current?.querySelector('.canvasWrapper');
+
+  // Reads the live text selection into page-space rects (PDF points, top-left origin). Returns
+  // null if there's no usable selection.
+  const captureTextSelection = () => {
     const selection = window.getSelection();
     const text = (selectedTextRef.current || selectionTooltip.text || '').trim();
-    if (!text || !selection.rangeCount) return;
+    if (!text || !selection.rangeCount) return null;
 
     const range = selection.getRangeAt(0);
     const clientRects = Array.from(range.getClientRects());
-    const canvasWrapper = containerRef.current.querySelector('.canvasWrapper');
-    if (!canvasWrapper || clientRects.length === 0) {
-      setSelectionTooltip({ visible: false });
-      return;
-    }
+    const canvasWrapper = getCanvasWrapper();
+    if (!canvasWrapper || clientRects.length === 0) return null;
 
     const canvasWrapperRect = canvasWrapper.getBoundingClientRect();
-    const rectsOnPage = clientRects.map((rect) => ({
+    const rects = clientRects.map((rect) => ({
       top: (rect.top - canvasWrapperRect.top) / scale,
       left: (rect.left - canvasWrapperRect.left) / scale,
       width: rect.width / scale,
       height: rect.height / scale,
     }));
+    return { rects, text };
+  };
 
-    setPendingSelection({ kind: 'text', pageNumber: currentPage, rects: rectsOnPage, text });
+  const handleAskAIForTextSelection = () => {
+    const captured = captureTextSelection();
     setSelectionTooltip({ visible: false });
+    if (!captured) return;
+
+    setPendingSelection({ kind: 'text', pageNumber: currentPage, rects: captured.rects, text: captured.text });
     window.getSelection().removeAllRanges();
 
-    if (onPassageMarked) onPassageMarked({ kind: 'text', text });
+    if (onPassageMarked) onPassageMarked({ kind: 'text', text: captured.text });
+  };
+
+  // Saves the selection as a highlight right away, with no note and no AI call.
+  const handleMarkOnlyTextSelection = async () => {
+    const captured = captureTextSelection();
+    setSelectionTooltip({ visible: false });
+    if (!captured || !validFilePath) return;
+    window.getSelection().removeAllRanges();
+
+    const result = await window.electron.saveAnnotation(validFilePath, {
+      pageNumber: currentPage,
+      kind: 'text',
+      rects: captured.rects,
+      note: '',
+      text: captured.text,
+    });
+    if (result?.success) {
+      await reloadAnnotations();
+      setActiveNoteId(result.id);
+    } else {
+      console.error('Failed to save mark:', result?.error);
+    }
+  };
+
+  // Best-effort text recovery for highlights saved without stored passage text: collects the
+  // text-layer spans whose centre falls inside one of the annotation's rects.
+  const extractTextForRects = (rects) => {
+    const canvasWrapper = getCanvasWrapper();
+    const textLayer = canvasWrapper?.querySelector('.textLayer');
+    if (!textLayer) return '';
+    const wrapperRect = canvasWrapper.getBoundingClientRect();
+    const parts = [];
+    textLayer.querySelectorAll('span').forEach((span) => {
+      const r = span.getBoundingClientRect();
+      if (!r.width || !r.height) return;
+      const cx = (r.left + r.width / 2 - wrapperRect.left) / scale;
+      const cy = (r.top + r.height / 2 - wrapperRect.top) / scale;
+      const inside = rects.some((rect) =>
+        cx >= rect.left && cx <= rect.left + rect.width && cy >= rect.top && cy <= rect.top + rect.height
+      );
+      if (inside) parts.push(span.textContent);
+    });
+    return parts.join(' ').replace(/\s+/g, ' ').trim();
+  };
+
+  const cropImageForRect = (rect) => {
+    const canvas = getCanvasWrapper()?.querySelector('canvas');
+    if (!canvas) return undefined;
+    const left = rect.left * scale;
+    const top = rect.top * scale;
+    const width = rect.width * scale;
+    const height = rect.height * scale;
+    if (width < 1 || height < 1) return undefined;
+    const cropCanvas = document.createElement('canvas');
+    cropCanvas.width = width;
+    cropCanvas.height = height;
+    cropCanvas.getContext('2d').drawImage(canvas, left, top, width, height, 0, 0, width, height);
+    return cropCanvas.toDataURL('image/png');
+  };
+
+  // Reopens a saved note in the AI panel so the user can ask further questions about the same
+  // passage; answers are appended to the existing annotation rather than creating a new one.
+  const handleFollowUpNote = (note) => {
+    if (!onPassageMarked) return;
+    setPendingSelection(null);
+    setActiveNoteId(note.id);
+    const existingNote = { id: note.id, note: note.note || '' };
+    if (note.kind === 'text') {
+      const text = note.text || extractTextForRects(note.rects);
+      onPassageMarked({ kind: 'text', text, existingNote });
+    } else {
+      const bounding = note.rects.reduce((acc, r) => ({
+        left: Math.min(acc.left, r.left),
+        top: Math.min(acc.top, r.top),
+        right: Math.max(acc.right, r.left + r.width),
+        bottom: Math.max(acc.bottom, r.top + r.height),
+      }), { left: Infinity, top: Infinity, right: -Infinity, bottom: -Infinity });
+      const imageDataUrl = cropImageForRect({
+        left: bounding.left, top: bounding.top, width: bounding.right - bounding.left, height: bounding.bottom - bounding.top,
+      });
+      onPassageMarked({ kind: 'region', imageDataUrl, existingNote });
+    }
+  };
+
+  const handleDeleteNote = async (id) => {
+    if (!validFilePath) return;
+    const result = await window.electron.deleteAnnotation(validFilePath, id);
+    if (result?.success) {
+      if (activeNoteId === id) setActiveNoteId(null);
+      await reloadAnnotations();
+    } else {
+      console.error('Failed to delete note:', result?.error);
+    }
   };
 
   // --- Region (image) selection: drag a rectangle over the rendered page ---
-  const getCanvasWrapper = () => containerRef.current?.querySelector('.canvasWrapper');
 
   const handleRegionMouseDown = (e) => {
     if (!regionMode) return;
@@ -447,11 +546,19 @@ const PDFViewer = forwardRef(({ filePath, onPassageMarked, onDocumentTextExtract
         kind: pendingSelection.kind,
         rects: pendingSelection.rects,
         note: noteText,
+        text: pendingSelection.text,
       });
       if (result.success) {
         setPendingSelection(null);
         await reloadAnnotations();
+        setActiveNoteId(result.id);
       }
+      return result;
+    },
+    updateNote: async (id, noteText) => {
+      if (!validFilePath) return { success: false, error: 'No document open' };
+      const result = await window.electron.updateAnnotationNote(validFilePath, id, noteText);
+      if (result.success) await reloadAnnotations();
       return result;
     },
     commitDocumentNote: async (noteText) => {
@@ -676,17 +783,29 @@ const PDFViewer = forwardRef(({ filePath, onPassageMarked, onDocumentTextExtract
             onMouseUp={(e) => e.stopPropagation()}
             onClick={(e) => e.stopPropagation()}
             style={{
-              position: 'fixed', left: selectionTooltip.x, top: selectionTooltip.y, width: '44px', height: '44px',
-              backgroundColor: 'rgba(42, 49, 65, 0.95)', border: '1px solid rgba(255, 255, 255, 0.2)', borderRadius: '50%',
+              position: 'fixed', left: selectionTooltip.x, top: selectionTooltip.y, height: '44px', padding: '0 4px',
+              backgroundColor: 'rgba(42, 49, 65, 0.95)', border: '1px solid rgba(255, 255, 255, 0.2)', borderRadius: '22px',
               boxShadow: '0 6px 25px rgba(0, 0, 0, 0.3)', color: 'white', zIndex: 9999, transform: 'translateX(-50%)',
-              display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', pointerEvents: 'auto',
+              display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '2px', pointerEvents: 'auto',
             }}
           >
             <button
-              style={{ width: '100%', height: '100%', background: 'transparent', border: 'none', borderRadius: '50%', color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', padding: 0 }}
+              title="Mark this passage (no AI)"
+              style={{ width: '38px', height: '38px', background: 'transparent', border: 'none', borderRadius: '50%', color: '#ffd966', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', padding: 0 }}
+              onClick={(e) => { e.stopPropagation(); handleMarkOnlyTextSelection(); }}
+            >
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M12 20h9"></path>
+                <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path>
+              </svg>
+            </button>
+            <div style={{ width: '1px', height: '22px', background: 'rgba(255, 255, 255, 0.2)' }} />
+            <button
+              title="Ask the AI to explain this passage"
+              style={{ width: '38px', height: '38px', background: 'transparent', border: 'none', borderRadius: '50%', color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', padding: 0 }}
               onClick={(e) => { e.stopPropagation(); handleAskAIForTextSelection(); }}
             >
-              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
               </svg>
             </button>
@@ -702,7 +821,13 @@ const PDFViewer = forwardRef(({ filePath, onPassageMarked, onDocumentTextExtract
       />
 
       <div style={{ width: `${notesColumnWidth}px`, flexShrink: 0, background: 'rgba(255, 255, 255, 0.03)', borderLeft: '1px solid rgba(255, 255, 255, 0.08)' }}>
-        <NotesColumn notes={notesForCurrentPage} activeNoteId={activeNoteId} onHoverNote={setActiveNoteId} />
+        <NotesColumn
+          notes={notesForCurrentPage}
+          activeNoteId={activeNoteId}
+          onHoverNote={setActiveNoteId}
+          onFollowUpNote={handleFollowUpNote}
+          onDeleteNote={handleDeleteNote}
+        />
       </div>
       </div>
     </div>

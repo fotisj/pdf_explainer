@@ -4,6 +4,7 @@ const initialState = {
   preferences: {
     openrouterApiKey: '',
     openrouterModel: '',
+    systemPromptAddition: '',
   },
   // What we know about the currently configured model, fetched from OpenRouter's model list.
   modelCapabilities: {
@@ -22,6 +23,8 @@ export const userSlice = createSlice({
       const { apiKey, model } = action.payload || {};
       if (typeof apiKey === 'string') state.preferences.openrouterApiKey = apiKey;
       if (typeof model === 'string') state.preferences.openrouterModel = model;
+      const { systemPromptAddition } = action.payload || {};
+      if (typeof systemPromptAddition === 'string') state.preferences.systemPromptAddition = systemPromptAddition;
     },
     setModelCapabilities: (state, action) => {
       const info = action.payload;

@@ -40,6 +40,7 @@ async function initializeStore() {
     store = new Store({
       schema: {
         openrouterModel: { type: 'string', default: '' },
+        systemPromptAddition: { type: 'string', default: '' },
         recentModels: { type: 'array', default: [], items: { type: 'string' }, maxItems: 8 },
         recentDocuments: {
           type: 'array',
@@ -83,6 +84,7 @@ function sanitizePathKey(filePath) {
 
 function setupHandlers() {
   aiService.updateSettings(process.env.OPENROUTER_API_KEY || '', store.get('openrouterModel', ''));
+  aiService.setSystemPromptAddition(store.get('systemPromptAddition', ''));
 
   ipcMain.handle('dialog:openFile', async () => {
     try {
@@ -131,6 +133,26 @@ function setupHandlers() {
     }
   });
 
+  ipcMain.handle('pdf:deleteAnnotation', async (event, filePath, id) => {
+    try {
+      await pdfAnnotations.deleteAnnotation(filePath, id);
+      return { success: true };
+    } catch (error) {
+      console.error('Error deleting PDF annotation:', error);
+      return { success: false, error: error.message };
+    }
+  });
+
+  ipcMain.handle('pdf:updateAnnotationNote', async (event, filePath, id, note) => {
+    try {
+      await pdfAnnotations.updateAnnotationNote(filePath, id, note);
+      return { success: true, id };
+    } catch (error) {
+      console.error('Error updating PDF annotation:', error);
+      return { success: false, error: error.message };
+    }
+  });
+
   ipcMain.handle('pdf:saveDocumentNote', async (event, filePath, note) => {
     try {
       const id = await pdfAnnotations.saveDocumentNote(filePath, note);
@@ -145,10 +167,15 @@ function setupHandlers() {
     apiKey: process.env.OPENROUTER_API_KEY || '',
     model: store.get('openrouterModel', '') || aiService.getModel(),
     recentModels: store.get('recentModels', []),
+    systemPromptAddition: store.get('systemPromptAddition', ''),
   }));
 
-  ipcMain.handle('settings:set', async (event, { model }) => {
+  ipcMain.handle('settings:set', async (event, { model, systemPromptAddition }) => {
     try {
+      if (typeof systemPromptAddition === 'string') {
+        store.set('systemPromptAddition', systemPromptAddition);
+        aiService.setSystemPromptAddition(systemPromptAddition);
+      }
       store.set('openrouterModel', model || '');
       const trimmedModel = (model || '').trim();
       if (trimmedModel) {
